@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Id": "it.lapo.pitpat",
+        "Name": "PitPat",
+        "Description": "Control your PitPat walking-pad treadmill and watch your walked distance",
+        "Icon": "run-build",
+        "Authors": [
+            {
+                "Email": "lapo@lapo.it",
+                "Name": "Lapo Luchini"
+            }
+        ],
+        "Category": "Health and Fitness",
+        "License": "ISC",
+        "Version": "0.1.0",
+        "X-Plasma-API-Minimum-Version": "6.0"
+    },
+    "Version": "0.1.0",
+    "SPI": 1
+}

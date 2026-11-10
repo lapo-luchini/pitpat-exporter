@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: ISC
+// transitional: remove as modules get wired into the daemon
+#![allow(dead_code)]
+
+mod ble;
+mod config;
 mod link;
 mod protocol;
+mod sim;
 
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "pitpat", about = "PitPat treadmill control + Prometheus export")]
+#[command(
+    name = "pitpat",
+    about = "PitPat treadmill control + Prometheus export"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

@@ -16,12 +16,7 @@ pub enum Command {
 ///
 /// `speed_kmh` is clamped to the valid u16 range; for start/set-speed it carries the
 /// requested speed, for pause/stop the current target speed.
-pub fn encode_command(
-    command: Command,
-    speed_kmh: f64,
-    weight_kg: u8,
-    user_id: u64,
-) -> [u8; 23] {
+pub fn encode_command(command: Command, speed_kmh: f64, weight_kg: u8, user_id: u64) -> [u8; 23] {
     let speed = (speed_kmh * 1000.0).round().clamp(0.0, 65535.0) as u16;
     let kind = match command {
         Command::SetSpeed => 0x05,
@@ -172,7 +167,9 @@ mod tests {
     use super::*;
 
     fn hex(s: &str) -> Vec<u8> {
-        s.split(' ').map(|x| u8::from_str_radix(x, 16).unwrap()).collect()
+        s.split(' ')
+            .map(|x| u8::from_str_radix(x, 16).unwrap())
+            .collect()
     }
 
     const USER_ID: u64 = 58965456623;
@@ -226,7 +223,15 @@ mod tests {
 
     #[test]
     fn decode_imperial() {
-        let pkt = encode_status(BeltState::Running, true, 2.0 * 1.609344, 1609, 840, 30, 1931.0);
+        let pkt = encode_status(
+            BeltState::Running,
+            true,
+            2.0 * 1.609344,
+            1609,
+            840,
+            30,
+            1931.0,
+        );
         let s = decode_status(&pkt).unwrap();
         assert!(s.imperial());
         // 2 mph ≈ 0.894 m/s

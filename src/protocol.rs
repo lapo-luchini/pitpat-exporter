@@ -109,7 +109,7 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
     let distance_m = if imperial {
         (be32(7) as f64 / 1000.0 * MI_TO_M).round() as u32
     } else {
-        be32(7) as u32 // distance × 1000 per km == metres in metric mode
+        be32(7) // distance × 1000 per km == metres in metric mode
     };
 
     Some(Status {

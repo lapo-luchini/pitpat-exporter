@@ -6,6 +6,7 @@ mod ble;
 mod config;
 mod link;
 mod protocol;
+mod session;
 mod sim;
 
 use clap::{Parser, Subcommand};

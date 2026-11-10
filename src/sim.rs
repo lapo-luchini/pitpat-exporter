@@ -112,11 +112,9 @@ impl SimBelt {
         let dt_s = dt.as_secs_f64();
 
         match self.state {
-            BeltState::Starting => {
-                if self.starting_ends_at.is_some_and(|t| Instant::now() >= t) {
-                    self.state = BeltState::Running;
-                    self.speed = 0.0;
-                }
+            BeltState::Starting if self.starting_ends_at.is_some_and(|t| Instant::now() >= t) => {
+                self.state = BeltState::Running;
+                self.speed = 0.0;
             }
             BeltState::Running => {
                 // ramp at 0.5 km/h per second toward the target

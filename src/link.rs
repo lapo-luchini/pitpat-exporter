@@ -52,7 +52,7 @@ impl Link {
     pub async fn connect(&mut self) -> Result<Conn, LinkError> {
         match self {
             Link::Sim(l) => l.connect().await.map(Conn::Sim),
-            Link::Ble(l) => l.connect().await.map(Conn::Ble),
+            Link::Ble(l) => l.connect().await,
         }
     }
 

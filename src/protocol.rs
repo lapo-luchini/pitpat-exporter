@@ -3,6 +3,16 @@
 /// Fixed 5-byte heartbeat packet sent when no command is queued.
 pub const HEARTBEAT: [u8; 5] = [0x6a, 0x05, 0xfd, 0xf8, 0x43];
 
+/// Treadmill GATT service UUID (PitPat).
+pub const SERVICE_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_fba0_0000_1000_8000_0080_5f9b_34fb);
+/// Command write characteristic.
+pub const WRITE_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_fba1_0000_1000_8000_0080_5f9b_34fb);
+/// Status notify characteristic.
+pub const NOTIFY_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_fba2_0000_1000_8000_0080_5f9b_34fb);
+
 /// Command packet (host → treadmill), 23 bytes (§3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {

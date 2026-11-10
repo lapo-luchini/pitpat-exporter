@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pitpat</title>
+<style>
+:root{color-scheme:light dark}
+body{font-family:system-ui,sans-serif;margin:0 auto;padding:12px;max-width:26rem;background:Canvas;color:CanvasText}
+h1{font-size:1.1rem;margin:.2rem 0}
+.chip{display:inline-block;padding:.15rem .6rem;border-radius:1rem;border:1px solid;font-size:.85rem}
+.speed{font-size:3.6rem;font-weight:700;line-height:1.1}
+.speed small{font-size:1rem;font-weight:400;color:GrayText}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin:.6rem 0}
+.cell{background:color-mix(in srgb,currentColor 6%,Canvas);border-radius:.5rem;padding:.4rem;text-align:center}
+.b{font-size:.9rem;font-weight:600}
+.lbl{font-size:.7rem;color:GrayText}
+button{padding:.5rem .7rem;border-radius:.5rem;border:1px solid GrayText;background:Canvas;color:CanvasText;font-size:1rem}
+button:disabled{opacity:.4}
+button.danger{background:Crimson;border-color:Crimson;color:white}
+button.primary{background:MediumSlateBlue;border-color:MediumSlateBlue;color:white}
+.row{display:flex;gap:.4rem;align-items:center;margin:.35rem 0;flex-wrap:wrap}
+.bar{height:.5rem;background:color-mix(in srgb,currentColor 12%,Canvas);border-radius:.25rem;overflow:hidden;margin:.2rem 0 0 0}
+.bar>div{height:100%;background:MediumSlateBlue;width:0%}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+td,th{padding:.2rem .3rem;text-align:right;border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent)}
+td:first-child{text-align:left}
+input.t{background:Field;color:FieldText;border:1px solid GrayText;border-radius:.4rem;padding:.45rem}
+input[type=range]{flex:1}
+@media(prefers-color-scheme:light){body{background:#fff}}
+</style>
+</head>
+<body>
+<h1>pitpat <span id="chip" class="chip">…</span></h1>
+<div class="speed"><span id="spd">–</span> <small>km/h</small></div>
+<div class="grid">
+<div class="cell"><div class="b" id="dist">–</div><div class="lbl">m</div></div>
+<div class="cell"><div class="b" id="time">–</div><div class="lbl">min</div></div>
+<div class="cell"><div class="b" id="steps">–</div><div class="lbl">steps</div></div>
+<div class="cell"><div class="b" id="kcal">–</div><div class="lbl">kcal</div></div>
+</div>
+<div><span id="tgtlbl" class="lbl"></span><div class="bar"><div id="tgtbar"></div></div></div>
+<div class="row"><span class="lbl">today</span> <b id="today">–</b> · <span class="lbl">lifetime</span> <b id="life">–</b></div>
+<div class="row">
+<button id="tog" class="primary">Start</button>
+<button id="dn">−0.1</button>
+<button id="up">+0.1</button>
+<input type="range" id="sl" step="0.1" min="1" max="6" value="2">
+</div>
+<div class="row" id="presets"></div>
+<div class="row">
+<button id="stop" class="danger">Stop</button>
+<input id="km" class="t" type="number" inputmode="decimal" min="0" step="0.1" placeholder="km target" style="width:7em">
+<input id="min" class="t" type="number" inputmode="numeric" min="0" step="5" placeholder="min" style="width:5.5em">
+<button id="tset">Set</button>
+<button id="tclear">Clear</button>
+</div>
+<div class="row"><span id="toklbl" class="lbl"></span></div>
+<h1>Sessions</h1>
+<table><tbody id="sess"></tbody></table>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const fmt=x=>x==null?'–':(+x).toFixed(1);
+let last=null;
+
+function snap(s){
+  last=s;const c=s.connected,st=s.state,ses=s.session,on=c&&st!=='stopped';
+  const chip=$('chip');
+  chip.textContent=on?st:'not connected';
+  chip.style.color=st==='running'?'MediumSeaGreen':st==='paused'?'DarkGoldenrod':c?'':'Grey';
+  $('spd').textContent=on?fmt(s.speed_kmh):'–';
+  $('dist').textContent=ses?fmt(ses.distance_m):'–';
+  $('time').textContent=ses?fmt(ses.duration_s/60):'–';
+  $('steps').textContent=ses?ses.steps:'–';
+  $('kcal').textContent=ses?ses.kcal:'–';
+  $('tog').disabled=!c||st==='starting';
+  $('stop').disabled=!c||st==='stopped';
+  const ctl=!c||st==='stopped';
+  $('dn').disabled=ctl;$('up').disabled=ctl;$('sl').disabled=ctl;
+  $('tog').textContent=st==='running'?'Pause':'Start';
+  if(document.activeElement!==$('sl'))$('sl').value=s.target_speed_kmh;
+  // target progress bar
+  let lbl='',pct=0;
+  if(s.target&&s.target.distance_m&&ses){
+    const d=ses.distance_m/s.target.distance_m*100;
+    pct=Math.min(100,d);lbl=d.toFixed(0)+'% of '+s.target.distance_m+' m';
+  }else if(s.target&&s.target.duration_s&&ses){
+    pct=Math.min(100,ses.duration_s/s.target.duration_s*100);
+    lbl=(ses.duration_s/60).toFixed(0)+' of '+(s.target.duration_s/60).toFixed(0)+' min';
+  }
+  $('tgtbar').style.width=pct+'%';$('tgtlbl').textContent=lbl;
+  slow();
+}
+let slow_at=0;
+async function slow(){
+  const now=Date.now();if(now-slow_at<5000)return;slow_at=now;
+  try{
+    const st=await(await fetch('/api/state')).json();
+    $('today').textContent=(st.today.distance_m/1000).toFixed(2)+' km';
+    $('life').textContent=(st.lifetime.distance_m/1000).toFixed(1)+' km';
+    presets(st.presets_kmh);
+  }catch(e){}
+}
+
+function tok(){return localStorage.getItem('pitpat_token')||''}
+function hdrs(){
+  const h={'Content-Type':'application/json'};
+  if(tok())h.Authorization='Bearer '+tok();
+  return h;
+}
+function ask(){
+  const t=prompt('API token required');
+  if(t!=null){localStorage.setItem('pitpat_token',t);$('toklbl').textContent=t?'token saved':'';}
+  return tok();
+}
+async function api(path,body,method){
+  let r;
+  for(let i=0;i<2;i++){
+    r=await fetch(path,{method:method||'POST',headers:hdrs(),
+      body:(method||'POST')==='DELETE'?'':JSON.stringify(body||{})});
+    if(r.status!==401)break;
+    if(!ask())break;
+  }
+  if(!r.ok)console.warn(path,r.status);
+  slow();
+  return r;
+}
+
+$('tog').onclick=()=>{
+  if(last&&last.state==='running')api('/api/pause',{});else api('/api/start',{});
+};
+$('stop').onclick=()=>api('/api/stop',{});
+$('up').onclick=()=>api('/api/speed',{delta_kmh:0.1});
+$('dn').onclick=()=>api('/api/speed',{delta_kmh:-0.1});
+$('sl').addEventListener('change',e=>api('/api/speed',{speed_kmh:+e.target.value}));
+$('tset').onclick=()=>{
+  const b={};
+  if(+$('km').value>0)b.distance_m=Math.round(+$('km').value*1000);
+  if(+$('min').value>0)b.duration_s=Math.round(+$('min').value*60);
+  if(b.distance_m||b.duration_s)api('/api/target',b);
+};
+$('tclear').onclick=()=>api('/api/target',null,'DELETE');
+
+let preset_btns=[];
+function presets(list){
+  if(JSON.stringify(list)===preset_btns.map(x=>x.label).join(','))return;
+  $('presets').innerHTML='';
+  (list||[]).forEach(v=>{
+    const b=document.createElement('button');
+    b.textContent=v;
+    b.onclick=()=>api('/api/speed',{speed_kmh:v});
+    $('presets').appendChild(b);
+  });
+  preset_btns=[].map.call($('presets').children,x=>({label:x.textContent}));
+}
+
+async function sessions(){
+  try{
+    const list=await(await fetch('/api/sessions?limit=10')).json();
+    $('sess').innerHTML=list.map(x=>
+      '<tr><td>'+new Date(x.start).toLocaleString()+'</td>'+
+      '<td>'+(x.distance_m/1000).toFixed(2)+' km</td>'+
+      '<td>'+x.steps+'</td><td>'+x.kcal+' kcal</td>'+
+      '<td>'+Math.round(x.duration_s/60)+' min</td></tr>').join('');
+  }catch(e){}
+  setTimeout(sessions,30000);
+}
+
+function live(){
+  const es=new EventSource('/api/events');
+  es.addEventListener('state',e=>snap(JSON.parse(e.data)));
+  es.onerror=()=>{}; // the browser reconnects on its own; the poller is the fallback
+}
+async function poll(){
+  try{snap(await(await fetch('/api/state')).json())}catch(e){}
+  setTimeout(poll,2000);
+}
+
+(function init(){
+  sessions();
+  poll();
+  setTimeout(live,100);
+})();
+</script>
+</body>
+</html>

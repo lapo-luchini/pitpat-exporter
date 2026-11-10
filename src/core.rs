@@ -125,6 +125,8 @@ pub struct Snapshot {
     pub queue_len: usize,
     pub session: Option<OpenSession>,
     pub target: Target,
+    /// Lifetime totals ride along for the state endpoint.
+    pub totals: Totals,
 }
 
 /// Why a connection died (drives the session end reason).
@@ -144,7 +146,7 @@ pub enum Ctrl {
     Shutdown,
 }
 
-const QUEUE_CAP: usize = 8;
+pub const QUEUE_CAP: usize = 8;
 /// No notification this long ⇒ the link is effectively dead (§4.1).
 pub const WATCHDOG_S: u64 = 10;
 /// Periodic totals.json flush while running (§4.4).
@@ -223,6 +225,7 @@ impl Core {
             queue_len: self.queue.len(),
             session: self.session.clone(),
             target: self.target,
+            totals: self.totals.clone(),
         }
     }
 

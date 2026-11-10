@@ -5,6 +5,7 @@
 mod ble;
 mod config;
 mod core;
+mod http;
 mod link;
 mod metrics;
 mod protocol;
@@ -13,7 +14,7 @@ mod sim;
 
 use clap::{Parser, Subcommand};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(
     name = "pitpat",
     about = "PitPat treadmill control + Prometheus export"
@@ -23,11 +24,14 @@ struct Cli {
     cmd: Cmd,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Cmd {
     Daemon,
 }
 
 fn main() {
-    let _cli = Cli::parse();
+    let cli = Cli::parse();
+    match cli.cmd {
+        Cmd::Daemon => (),
+    }
 }

@@ -5,6 +5,7 @@
 mod ble;
 mod config;
 mod link;
+mod metrics;
 mod protocol;
 mod session;
 mod sim;

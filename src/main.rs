@@ -4,6 +4,7 @@
 
 mod ble;
 mod config;
+mod core;
 mod link;
 mod metrics;
 mod protocol;

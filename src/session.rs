@@ -158,6 +158,15 @@ pub struct Counters {
     pub duration_s: f64,
 }
 
+/// One accepted delta between two counter snapshots.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Delta {
+    pub distance_m: u32,
+    pub steps: u32,
+    pub kcal: u16,
+    pub moving_s: f64,
+}
+
 /// Per-connection delta tracker (§4.4): the first packet after (re)connecting
 /// is the baseline (a possible continuation already counted), normal deltas
 /// go through as-is, resets count from zero, absurd deltas are rejected.
@@ -174,22 +183,20 @@ impl DeltaTracker {
         Self::default()
     }
 
-    /// Update the lifetime totals from a fresh notification.
-    pub fn apply(&mut self, totals: &mut Totals, c: Counters) -> bool {
+    /// Compute the lifetime-totals delta from a fresh notification.
+    pub fn apply(&mut self, c: Counters) -> Option<Delta> {
         let Some(last) = self.last else {
             // first packet after (re)connecting: baseline only
             self.last = Some(c);
-            return false;
+            return None;
         };
-        if c.distance_m.saturating_sub(last.distance_m) > MAX_DISTANCE_DELTA_M
-            && c.distance_m > last.distance_m
-        {
+        if c.distance_m > last.distance_m && c.distance_m - last.distance_m > MAX_DISTANCE_DELTA_M {
             tracing::warn!(
                 distance_m = c.distance_m,
                 last = last.distance_m,
                 "absurd distance delta rejected"
             );
-            return false;
+            return None;
         }
         if c.steps > last.steps && c.steps - last.steps > MAX_STEPS_DELTA {
             tracing::warn!(
@@ -197,26 +204,29 @@ impl DeltaTracker {
                 last = last.steps,
                 "absurd steps delta rejected"
             );
-            return false;
+            return None;
         }
-
-        let dist_d = d(c.distance_m, last.distance_m);
-        let steps_d = d(c.steps, last.steps);
-        let kcal_d = d(u32::from(c.kcal), u32::from(last.kcal));
-        let dur_d = f(c.duration_s, last.duration_s);
-
-        totals.distance_m += dist_d as u64;
-        totals.steps += steps_d as u64;
-        totals.kcal += kcal_d as u64;
-        totals.moving_s += dur_d;
-
         self.last = Some(c);
-        true
+        Some(Delta {
+            distance_m: d(c.distance_m, last.distance_m),
+            steps: d(c.steps, last.steps),
+            kcal: du16(c.kcal, last.kcal),
+            moving_s: f(c.duration_s, last.duration_s),
+        })
     }
 
     /// Clear the baseline (e.g. the device disconnected).
     pub fn reset(&mut self) {
         self.last = None;
+    }
+}
+
+fn du16(new: u16, last: u16) -> u16 {
+    if new >= last {
+        new - last
+    } else {
+        // counter reset: count from zero
+        new
     }
 }
 
@@ -281,59 +291,84 @@ mod tests {
     #[test]
     fn deltas_normal_and_reset() {
         let mut dt = DeltaTracker::new();
-        let mut t = Totals::default();
-        assert!(
-            !dt.apply(&mut t, c(0, 0, 0, 0.0)),
+        assert_eq!(
+            dt.apply(c(0, 0, 0, 0.0)),
+            None,
             "baseline packet counts nothing"
         );
-        assert!(dt.apply(&mut t, c(1, 2, 1, 0.5)));
-        assert!(dt.apply(&mut t, c(3, 4, 2, 1.5)));
-        assert_eq!(t.distance_m, 3);
-        assert_eq!(t.steps, 4);
-        assert_eq!(t.kcal, 2);
-        assert_eq!(t.moving_s, 1.5);
-        // reset: distance goes down, count from zero
-        assert!(dt.apply(&mut t, c(1, 1, 0, 0.2)));
-        assert_eq!(t.distance_m, 4);
-        assert_eq!(t.steps, 5);
-        assert_eq!(t.kcal, 2);
+        assert_eq!(
+            dt.apply(c(1, 2, 1, 0.5)),
+            Some(Delta {
+                distance_m: 1,
+                steps: 2,
+                kcal: 1,
+                moving_s: 0.5,
+            })
+        );
+        assert_eq!(
+            dt.apply(c(3, 4, 2, 1.5)),
+            Some(Delta {
+                distance_m: 2,
+                steps: 2,
+                kcal: 1,
+                moving_s: 1.0,
+            })
+        );
+        // reset: counters go down, count from zero
+        assert_eq!(
+            dt.apply(c(1, 1, 0, 0.2)),
+            Some(Delta {
+                distance_m: 1,
+                steps: 1,
+                kcal: 0,
+                moving_s: 0.0,
+            })
+        );
     }
 
     #[test]
     fn deltas_absurd_rejected() {
         let mut dt = DeltaTracker::new();
-        let mut t = Totals::default();
-        dt.apply(&mut t, c(0, 0, 0, 0.0));
-        // 60 m in one packet: rejected(, the baseline stays)
-        assert!(!dt.apply(&mut t, c(60, 0, 0, 5.0)));
-        // still, next sane packet resumes counting
-        assert!(dt.apply(&mut t, c(2, 1, 0, 1.0)));
-        assert_eq!(t.distance_m, 2);
+        dt.apply(c(0, 0, 0, 0.0));
+        // 60 m in one packet: rejected, the baseline stays
+        assert_eq!(dt.apply(c(60, 0, 0, 5.0)), None);
+        // last remains the last accepted baseline: next sane packet resumes
+        assert_eq!(
+            dt.apply(c(2, 1, 0, 1.0)),
+            Some(Delta {
+                distance_m: 2,
+                steps: 1,
+                kcal: 0,
+                moving_s: 1.0,
+            })
+        );
         // 200 steps in one packet: rejected
-        assert!(!dt.apply(&mut t, c(3, 200, 0, 2.0)));
-        assert_eq!(t.steps, 1);
+        assert_eq!(dt.apply(c(3, 200, 0, 2.0)), None);
     }
 
     #[test]
     fn deltas_reconnect_ignores_first() {
-        // A treadmill whose counters kept counting across a reconnect must
-        // not double-count: the first packet after reconnecting is a baseline.
+        // Counters kept counting while the link was down: on reconnect the
+        // baseline is re-established, so the first packet after reconnecting
+        // must not count as a delta (otherwise the continuation would
+        // double-count what was already aggregated).
         let mut dt = DeltaTracker::new();
-        let mut t = Totals {
-            distance_m: 100,
-            steps: 140,
-            kcal: 10,
-            moving_s: 120.0,
-            sessions: 0,
-        };
-        // counters kept going while the link was down: first packet after
-        // reconnecting must be a baseline, not a delta
-        dt.apply(&mut t, c(104, 142, 11, 124.0));
-        assert_eq!(t.distance_m, 100, "continuation must not double-count");
-        assert_eq!(t.steps, 140);
-        dt.apply(&mut t, c(107, 145, 12, 127.0));
-        assert_eq!(t.distance_m, 103);
-        assert_eq!(t.moving_s, 123.0);
+        assert_eq!(dt.apply(c(100, 140, 10, 120.0)), None, "baseline");
+        dt.reset(); // link died
+        assert_eq!(
+            dt.apply(c(104, 142, 11, 124.0)),
+            None,
+            "first packet after reconnect is the new baseline"
+        );
+        assert_eq!(
+            dt.apply(c(107, 145, 12, 127.0)),
+            Some(Delta {
+                distance_m: 3,
+                steps: 3,
+                kcal: 1,
+                moving_s: 3.0,
+            })
+        );
     }
 
     #[test]

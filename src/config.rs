@@ -91,6 +91,30 @@ impl Config {
     }
 }
 
+/// Config subset the core state machine and packet encoders need.
+#[derive(Debug, Clone)]
+pub struct DaemonCfg {
+    pub weight_kg: u8,
+    pub user_id: u64,
+    pub min_speed: f64,
+    pub max_speed: f64,
+    pub default_speed: f64,
+    pub presets: Vec<f64>,
+}
+
+impl From<&Config> for DaemonCfg {
+    fn from(c: &Config) -> Self {
+        Self {
+            weight_kg: c.weight_kg,
+            user_id: c.user_id,
+            min_speed: c.min_speed,
+            max_speed: c.max_speed,
+            default_speed: c.default_speed,
+            presets: c.presets.clone(),
+        }
+    }
+}
+
 fn default_state_dir() -> PathBuf {
     if let Ok(dirs) = std::env::var("STATE_DIRECTORY") {
         if let Some(first) = dirs.split(':').next() {

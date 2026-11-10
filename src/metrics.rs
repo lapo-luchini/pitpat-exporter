@@ -58,7 +58,7 @@ impl Default for Metrics {
 impl Metrics {
     pub fn new() -> Self {
         let mut registry = Registry::default();
-        let mut sub = registry.sub_registry_with_prefix("pitpat");
+        let sub = registry.sub_registry_with_prefix("pitpat");
 
         macro_rules! reg_g {
             ($name:expr) => {{

@@ -60,3 +60,25 @@ impl Link {
         matches!(self, Link::Sim(_))
     }
 }
+
+/// Abstract notification/packet pair, so the core pump and its tests can
+/// drive any connection: real Link/Conn enums or scripted fake links.
+pub trait Notify {
+    async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError>;
+    async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError>;
+}
+
+macro_rules! delegate {
+    ($($v:ident),*) => {
+        impl Notify for Conn {
+            async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
+                match self { $(Conn::$v(c) => c.recv_notification().await,)* }
+            }
+            async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
+                match self { $(Conn::$v(c) => c.write_packet(pkt).await,)* }
+            }
+        }
+    };
+}
+
+delegate!(Sim, Ble);

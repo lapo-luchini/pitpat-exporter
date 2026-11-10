@@ -8,6 +8,7 @@ use crate::protocol as p;
 use crate::session::{DeltaTracker, EndReason, Totals};
 use jiff::Timestamp;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
@@ -140,9 +141,8 @@ pub enum DeadReason {
 /// Control messages from signal tasks into the pump.
 #[derive(Debug, Clone, Copy)]
 pub enum Ctrl {
-    /// `--simulate` + SIGUSR1: drop the link to practise reconnecting.
-    DropLink,
-    /// SIGTERM/SIGINT: shut down cleanly (§4.6).
+    /// SIGTERM/SIGINT: shut down cleanly (§4.6). The simulator's link drop
+    /// is handled via its shared flag, not through the pump.
     Shutdown,
 }
 
@@ -154,11 +154,13 @@ pub const PERSIST_S: u64 = 60;
 
 pub struct Core {
     pub cfg: crate::config::DaemonCfg,
-    pub metrics: Metrics,
+    pub metrics: Arc<Metrics>,
     pub totals: Totals,
     deltas: DeltaTracker,
     pub state: State,
-    prev_state: State,
+    /// Open a session on the next running packet (first running after
+    /// stopped/disconnected, §4.3); paused/starting never open one.
+    may_open: bool,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -182,7 +184,7 @@ impl Core {
     pub fn new(
         cfg: crate::config::DaemonCfg,
         totals: Totals,
-        metrics: Metrics,
+        metrics: Arc<Metrics>,
         events: broadcast::Sender<Snapshot>,
         inbox: mpsc::Receiver<ApiCmd>,
         state_dir: std::path::PathBuf,
@@ -194,7 +196,7 @@ impl Core {
             totals,
             deltas: DeltaTracker::new(),
             state: State::Disconnected,
-            prev_state: State::Disconnected,
+            may_open: true,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -411,24 +413,30 @@ impl Core {
 
         let belt = State::from(st.belt_state());
         self.begin_session_if_needed(belt);
-        self.update_running_session(&st);
+        if belt != State::Stopped {
+            // a Stopped packet carries the treadmill's post-reset counters
+            // (back to 0 on stop): keep the session's last values instead
+            self.update_running_session(&st);
+        }
         self.sync_target_speed(belt);
         self.state = belt;
-        if self.state == State::Stopped && self.prev_state != State::Stopped {
+        match belt {
+            State::Stopped | State::Disconnected => self.may_open = true,
+            _ => {}
+        }
+        if self.state == State::Stopped {
             self.close_session(EndReason::Stopped);
         }
-        self.prev_state = self.state;
         self.check_targets();
         self.publish();
     }
 
     /// A session starts on the first running after stopped/disconnected.
     fn begin_session_if_needed(&mut self, belt: State) {
-        if belt != State::Running
-            || !matches!(self.prev_state, State::Disconnected | State::Stopped)
-        {
+        if belt != State::Running || !self.may_open {
             return;
         }
+        self.may_open = false;
         self.session = Some(OpenSession {
             start: now_ts(),
             distance_m: 0,
@@ -560,7 +568,7 @@ impl Core {
     /// forget the delta baseline, keep aligned state.
     pub fn on_disconnect(&mut self, reason: DeadReason) {
         self.state = State::Disconnected;
-        self.prev_state = State::Disconnected;
+        self.may_open = true;
         self.deltas.reset();
         self.session_bof = None;
         self.queue.clear();
@@ -580,13 +588,10 @@ impl Core {
     pub fn begin_connection(&mut self, address: Option<String>) {
         self.address = address;
         self.deltas.reset();
-        self.prev_state = State::Disconnected;
+        // first running after the (re)connect opens a session (§4.3)
+        self.may_open = true;
         self.forget_settle();
         self.publish();
-    }
-
-    pub fn set_address(&mut self, addr: impl Into<String>) {
-        self.address = Some(addr.into());
     }
 
     // ------------------------------------------- heartbeat / reply side
@@ -617,10 +622,6 @@ impl Core {
         } else {
             self.pending_write = Some(pkt);
         }
-    }
-
-    pub fn inbox_mut(&mut self) -> &mut mpsc::Receiver<ApiCmd> {
-        &mut self.inbox
     }
 }
 
@@ -664,42 +665,37 @@ pub async fn pump<C: Notify>(
     conn: &mut C,
     ctrl: &mut mpsc::Receiver<Ctrl>,
 ) -> DeadReason {
-    let mut last_notification = tokio::time::Instant::now();
+    // The notification future is recreated on every loop pass; this is safe
+    // ONLY because no other select arm can complete while it is pending —
+    // an earlier two-price sleep arm caused the recreated timer to restart
+    // and starve notifications forever.
     let mut next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
     loop {
         core.drain_api_cmds();
+        core.metrics.last_notification.set(unix_now());
 
         tokio::select! {
-            ev = conn.recv_notification() => {
+            ev = tokio::time::timeout(Duration::from_secs(WATCHDOG_S), conn.recv_notification()) => {
                 let raw = match ev {
-                    Ok(raw) => raw,
-                    Err(_) => return DeadReason::Link,
+                    Ok(Ok(raw)) => raw,
+                    Ok(Err(_)) => return DeadReason::Link,
+                    Err(_) => {
+                        tracing::warn!(secs = WATCHDOG_S, "no notification, forcing reconnect");
+                        return DeadReason::Watchdog;
+                    }
                 };
-                last_notification = tokio::time::Instant::now();
                 core.on_packet(&raw);
                 core.drain_api_cmds();
                 write_reply(core, conn).await;
+                if core.moving() && tokio::time::Instant::now() >= next_persist {
+                    next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
+                    core.persist();
+                }
             }
             c = ctrl.recv() => match c {
-                Some(Ctrl::DropLink) => {
-                    // the SIGUSR1 handler already flagged the simulator
-                    tracing::info!("simulated link drop requested");
-                }
                 Some(Ctrl::Shutdown) => return DeadReason::Shutdown,
                 None => return DeadReason::Link,
             },
-            _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                if last_notification.elapsed() > Duration::from_secs(WATCHDOG_S) {
-                    tracing::warn!(secs = WATCHDOG_S, "no notification, forcing reconnect");
-                    return DeadReason::Watchdog;
-                }
-                if tokio::time::Instant::now() >= next_persist {
-                    next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
-                    if core.moving() {
-                        core.persist();
-                    }
-                }
-            }
         }
     }
 }
@@ -728,21 +724,20 @@ mod tests {
 
     struct T {
         core: Core,
-        api_tx: mpsc::Sender<ApiCmd>,
     }
 
     fn mkcore(dir: &std::path::Path) -> T {
         let (events, _ev_rx) = tokio::sync::broadcast::channel(8);
-        let (api_tx, api_rx) = mpsc::channel(32);
+        let (_, api_rx) = mpsc::channel(32);
         let core = Core::new(
             cfg(),
             Totals::default(),
-            Metrics::new(),
+            Arc::new(Metrics::new()),
             events,
             api_rx,
             dir.into(),
         );
-        T { core, api_tx }
+        T { core }
     }
 
     const USER: u64 = 58965456623;
@@ -1143,7 +1138,7 @@ mod tests {
         let mut core = Core::new(
             cfg(),
             Totals::default(),
-            Metrics::new(),
+            Arc::new(Metrics::new()),
             events,
             api_rx,
             dir,

@@ -29,6 +29,8 @@ struct SimBelt {
     target: f64,
     speed: f64,
     distance_m: u32,
+    /// fractional part below 1 m (counters advance <1 m per tick)
+    distance_f: f64,
     steps: u32,
     kcal: u16,
     duration_s: f64,
@@ -45,11 +47,14 @@ impl SimLink {
         }
     }
 
-    pub fn request_drop(&self) {
-        self.drop.store(true, Ordering::Relaxed);
+    /// The shared drop flag so a signal task can flip it from elsewhere.
+    pub fn drop_flag(&self) -> Arc<AtomicBool> {
+        self.drop.clone()
     }
 
     pub async fn connect(&self) -> Result<SimConn, LinkError> {
+        // a fresh connection revives the link (SIGUSR1 was just a probe)
+        self.drop.store(false, Ordering::Relaxed);
         Ok(SimConn {
             belt: SimBelt::new(),
             weight_kg: self.weight_kg,
@@ -66,6 +71,7 @@ impl SimBelt {
             target: 1.0,
             speed: 0.0,
             distance_m: 0,
+            distance_f: 0.0,
             steps: 0,
             kcal: 0,
             duration_s: 0.0,
@@ -98,6 +104,7 @@ impl SimBelt {
                 self.state = BeltState::Stopped;
                 self.speed = 0.0;
                 self.distance_m = 0;
+                self.distance_f = 0.0;
                 self.steps = 0;
                 self.kcal = 0;
                 self.duration_s = 0.0;
@@ -124,10 +131,15 @@ impl SimBelt {
                 } else {
                     (self.speed - step).max(self.target)
                 };
-                let km = self.speed * dt_s / 3.6;
-                self.distance_m += (km * 1000.0).round() as u32;
-                self.steps += (km * 1000.0 / 0.7) as u32;
-                self.kcal = ((self.kcal as f64) + 0.5 * weight_kg as f64 * km) as u16;
+                // speed in km/h, dt in s → metres: 1 km/h for 1 s is
+                // 1000/3600 m
+                let metres = self.speed * dt_s * 1000.0 / 3600.0;
+                self.distance_f += metres;
+                self.distance_m = self.distance_f as u32;
+                // steps ≈ distance / 0.7 m (§4.7)
+                self.steps += (metres / 0.7) as u32;
+                // kcal ≈ 0.5 × weight_kg × km
+                self.kcal = ((self.kcal as f64) + 0.5 * weight_kg as f64 * metres / 1000.0) as u16;
                 self.duration_s += dt_s;
             }
             _ => {}
@@ -173,11 +185,14 @@ impl SimConn {
             return Err(LinkError::Dead("simulated link dropped (SIGUSR1)".into()));
         }
         let tick = Instant::now();
-        // Counters advance from real elapsed time, even if the tick is late.
+        // Counters advance from real elapsed time, but a burst of lost
+        // ticks must not redeem itself at once (the Starting/Stopped time
+        // does not count toward the moving counters anyway).
         let dt = self
             .last_tick
             .replace(tick)
-            .map_or(NOTIFY_PERIOD, |t| tick.duration_since(t));
+            .map_or(NOTIFY_PERIOD, |t| tick.duration_since(t))
+            .min(NOTIFY_PERIOD);
         let (state, dist, steps, kcal, dur) = self.belt.tick(dt, self.weight_kg);
         Ok(
             crate::protocol::encode_status(state, false, self.belt.speed, dist, steps, kcal, dur)
@@ -272,12 +287,38 @@ mod tests {
         c.write_packet(&crate::protocol::encode_command(Command::Start, 2.0, 80, 1))
             .await
             .unwrap();
-        link.request_drop();
+        link.drop_flag().store(true, Ordering::Relaxed);
         assert!(matches!(
             tokio::time::timeout(Duration::from_secs(2), c.recv_notification())
                 .await
                 .unwrap(),
             Err(LinkError::Dead(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod dbg {
+    use super::*;
+    #[tokio::test(flavor = "current_thread")]
+    async fn distance_grows_linearly() {
+        let link = SimLink::new(80);
+        let mut c = link.connect().await.unwrap();
+        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
+            .await
+            .unwrap();
+        let mut prev = 0u32;
+        for i in 0..8 {
+            let pkt = c.recv_notification().await.unwrap();
+            let st = crate::protocol::decode_status(&pkt).unwrap();
+            let d = st.distance_m.saturating_sub(prev);
+            prev = st.distance_m;
+            eprintln!(
+                "pkt {i}: dist={} delta={d} state={:?}",
+                st.distance_m,
+                st.belt_state()
+            );
+        }
+        assert!(prev <= 5, "delta too big: {prev}");
     }
 }

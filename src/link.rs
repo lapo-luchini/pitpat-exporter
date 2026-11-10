@@ -6,7 +6,7 @@ pub enum LinkError {
     /// Device not found / adapter absent (retry with backoff, same policy).
     NotFound,
     /// Connection established then died, or connect attempt failed transiently.
-    Dead(String),
+    Dead(#[allow(dead_code)] String),
 }
 
 /// A single connection to the treadmill: notifications in, packets out.
@@ -54,10 +54,6 @@ impl Link {
             Link::Sim(l) => l.connect().await.map(Conn::Sim),
             Link::Ble(l) => l.connect().await,
         }
-    }
-
-    pub fn is_sim(&self) -> bool {
-        matches!(self, Link::Sim(_))
     }
 }
 

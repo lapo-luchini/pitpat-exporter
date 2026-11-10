@@ -108,7 +108,6 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
     let flags = pkt[26];
     let imperial = flags & 0x80 != 0;
     const MPH_TO_MPS: f64 = 0.44704;
-    const KM_TO_M: f64 = 1000.0;
     const MI_TO_M: f64 = 1609.344;
 
     let speed_mps = if imperial {

@@ -196,6 +196,9 @@ impl DeltaTracker {
                 last = last.distance_m,
                 "absurd distance delta rejected"
             );
+            // re-baseline: without this every later packet stays rejected
+            // (the treadmill did move, just not all at once)
+            self.last = Some(c);
             return None;
         }
         if c.steps > last.steps && c.steps - last.steps > MAX_STEPS_DELTA {
@@ -204,6 +207,7 @@ impl DeltaTracker {
                 last = last.steps,
                 "absurd steps delta rejected"
             );
+            self.last = Some(c);
             return None;
         }
         self.last = Some(c);
@@ -330,11 +334,11 @@ mod tests {
     fn deltas_absurd_rejected() {
         let mut dt = DeltaTracker::new();
         dt.apply(c(0, 0, 0, 0.0));
-        // 60 m in one packet: rejected, the baseline stays
+        // 60 m in one packet: rejected, but re-baselines
         assert_eq!(dt.apply(c(60, 0, 0, 5.0)), None);
-        // last remains the last accepted baseline: next sane packet resumes
+        // the next sane packet resumes from the re-baselined point
         assert_eq!(
-            dt.apply(c(2, 1, 0, 1.0)),
+            dt.apply(c(62, 1, 0, 6.0)),
             Some(Delta {
                 distance_m: 2,
                 steps: 1,
@@ -342,8 +346,8 @@ mod tests {
                 moving_s: 1.0,
             })
         );
-        // 200 steps in one packet: rejected
-        assert_eq!(dt.apply(c(3, 200, 0, 2.0)), None);
+        // 200 steps in one packet: rejected (and re-baselined too)
+        assert_eq!(dt.apply(c(63, 250, 0, 7.0)), None);
     }
 
     #[test]

@@ -61,55 +61,76 @@ impl Metrics {
         let sub = registry.sub_registry_with_prefix("pitpat");
 
         macro_rules! reg_g {
-            ($name:expr) => {{
+            ($name:expr, $help:expr) => {{
                 let m: Gauge = Gauge::default();
-                sub.register($name, "".to_string(), m.clone());
+                sub.register($name, $help.to_string(), m.clone());
                 m
             }};
         }
         macro_rules! reg_f {
-            ($name:expr) => {{
+            ($name:expr, $help:expr) => {{
                 let m: FGauge = Gauge::default();
-                sub.register($name, "".to_string(), m.clone());
+                sub.register($name, $help.to_string(), m.clone());
                 m
             }};
         }
         macro_rules! reg_c {
-            ($name:expr) => {{
+            ($name:expr, $help:expr) => {{
                 let m: Counter = Counter::default();
-                sub.register($name, "".to_string(), m.clone());
+                sub.register($name, $help.to_string(), m.clone());
                 m
             }};
         }
 
-        let connected = reg_g!("connected");
-        let speed_mps = reg_f!("speed_meters_per_second");
-        let target_speed_mps = reg_f!("target_speed_meters_per_second");
-        let session_distance_m = reg_g!("session_distance_meters");
-        let session_steps = reg_g!("session_steps");
-        let session_kcal = reg_g!("session_energy_kilocalories");
-        let session_duration_s = reg_f!("session_duration_seconds");
-        let last_notification = reg_f!("last_notification_timestamp_seconds");
+        let connected = reg_g!("connected", "0/1 when a BLE link is established");
+        let speed_mps = reg_f!("speed_meters_per_second", "current belt speed");
+        let target_speed_mps = reg_f!(
+            "target_speed_meters_per_second",
+            "currently requested belt speed"
+        );
+        let session_distance_m = reg_g!(
+            "session_distance_meters",
+            "session distance from the treadmill counters"
+        );
+        let session_steps = reg_g!(
+            "session_steps",
+            "session step count from the treadmill counters"
+        );
+        let session_kcal = reg_g!(
+            "session_energy_kilocalories",
+            "session energy from the treadmill counters"
+        );
+        let session_duration_s = reg_f!(
+            "session_duration_seconds",
+            "session moving time from the treadmill counters"
+        );
+        let last_notification = reg_f!(
+            "last_notification_timestamp_seconds",
+            "Unix time of the last notification"
+        );
         let state: Family<StateLabel, Gauge> = Family::default();
         sub.register(
             "state",
             "1 for the current belt state, 0 for the others".to_string(),
             state.clone(),
         );
-        let distance_m_total = reg_c!("distance_meters_total");
-        let steps_total = reg_c!("steps_total");
-        let energy_kcal_total = reg_c!("energy_kilocalories_total");
-        let moving_seconds_total = reg_f!("moving_seconds_total");
-        let sessions_total = reg_c!("sessions_total");
-        let reconnects_total = reg_c!("reconnects_total");
-        let invalid_packets_total = reg_c!("invalid_packets_total");
+        let distance_m_total = reg_c!("distance_meters", "lifetime walked distance");
+        let steps_total = reg_c!("steps", "lifetime step count");
+        let energy_kcal_total = reg_c!("energy_kilocalories", "lifetime energy");
+        let moving_seconds_total = reg_f!("moving_seconds", "lifetime moving seconds");
+        let sessions_total = reg_c!("sessions", "lifetime walked sessions");
+        let reconnects_total = reg_c!("reconnects", "reconnects after link loss");
+        let invalid_packets_total = reg_c!(
+            "invalid_packets",
+            "status notifications that failed to decode"
+        );
 
         let bu: Family<BuildInfo, Gauge> = Family::default();
         bu.get_or_create(&BuildInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
         })
         .set(1);
-        sub.register("build_info", "build information, always 1".to_string(), bu);
+        sub.register("build_info", "build version, always 1".to_string(), bu);
 
         Self {
             registry,

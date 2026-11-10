@@ -1,0 +1,30 @@
+[package]
+name = "pitpat"
+description = "PitPat walking-pad treadmill BLE controller and Prometheus exporter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "ISC"
+authors = ["Lapo Luchini <lapo@lapo.it>"]
+repository = "https://git.lapo.it/~~/pitpat_exporter"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "signal", "fs"] }
+bluer = { version = "0.17", features = ["bluetoothd"] }
+futures = "0.3"
+axum = { version = "0.8", default-features = false, features = ["json", "query", "tokio", "http1", "matched-path", "original-uri"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+prometheus-client = "0.23"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+ureq = "3"
+jiff = { version = "0.2", features = ["serde", "tz-system"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = "s"

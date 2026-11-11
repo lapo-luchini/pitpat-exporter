@@ -83,6 +83,18 @@ pitpat sessions [-n 10]
 Client flags: `--url` (default `http://127.0.0.1:9839`, env `PITPAT_URL`) and
 `--token-file` (env `PITPAT_TOKEN_FILE`).
 
+### Global shortcuts (Plasma)
+
+A plasmoid can't register several global shortcuts, so bind the CLI in
+*System Settings → Keyboard → Shortcuts → Add New → Command*:
+
+| Shortcut | Command |
+|---|---|
+| Meta+Space | `pitpat toggle` |
+| Meta+Up | `pitpat speed +0.1` |
+| Meta+Down | `pitpat speed -0.1` |
+| Meta+End | `pitpat stop` |
+
 ## Safety note about remote control
 
 The API can make the belt start moving on a machine someone may be standing on. Keep the

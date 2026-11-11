@@ -273,30 +273,56 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
     let mut backoff_s = 1u64;
     loop {
         core.begin_connection(None);
-        match link.connect().await {
-            Ok(conn) => {
+        // a shutdown signal must not wait for the whole scan/connect
+        // attempt (REVIEW item 6)
+        let connect_outcome = {
+            let connect = link.connect();
+            futures::pin_mut!(connect);
+            tokio::select! {
+                outcome = &mut connect => Some(outcome),
+                c = ctrl_rx.recv() => match c {
+                    Some(core::Ctrl::Shutdown) | None => None,
+                },
+            }
+        };
+        let mut conn = match connect_outcome {
+            Some(Ok(conn)) => {
                 let addr = conn.address();
                 core.begin_connection(Some(addr.clone()));
                 tracing::info!(address = %addr, "link established");
                 backoff_s = 1;
-                let mut conn = conn;
-                let reason = core::pump(&mut core, &mut conn, &mut ctrl_rx).await;
-                if reason == core::DeadReason::Shutdown {
-                    shutdown_flow(&mut core, &mut conn).await;
-                    break;
-                }
-                tracing::warn!(?reason, address = %addr, "link lost, reconnecting");
-                core.on_disconnect(reason);
+                conn
             }
-            Err(err) => {
+            Some(Err(err)) => {
                 tracing::warn!(?err, "connection failed");
                 core.on_disconnect(core::DeadReason::Link);
+                core.metrics.reconnects_total.inc();
+                if sleep_or_shutdown(backoff_s, &mut ctrl_rx).await {
+                    core.on_disconnect(core::DeadReason::Shutdown);
+                    break;
+                }
+                backoff_s = (backoff_s * 2).min(30);
+                continue;
             }
+            None => {
+                // shutdown while connecting
+                core.on_disconnect(core::DeadReason::Shutdown);
+                break;
+            }
+        };
+        let reason = core::pump(&mut core, &mut conn, &mut ctrl_rx).await;
+        if reason == core::DeadReason::Shutdown {
+            shutdown_flow(&mut core, &mut conn).await;
+            break;
         }
+        tracing::warn!(?reason, address = %conn.address(), "link lost, reconnecting");
+        // drop the LE link even when the notify stream died: BlueZ would
+        // keep the treadmill locked against its phone app otherwise
+        // (REVIEW item 6)
+        conn.disconnect().await;
+        core.on_disconnect(reason);
         core.metrics.reconnects_total.inc();
-        let woke =
-            tokio::time::timeout(std::time::Duration::from_secs(backoff_s), ctrl_rx.recv()).await;
-        if let Ok(Some(core::Ctrl::Shutdown)) = woke {
+        if sleep_or_shutdown(backoff_s, &mut ctrl_rx).await {
             core.on_disconnect(core::DeadReason::Shutdown);
             break;
         }
@@ -375,6 +401,18 @@ async fn shutdown_flow(core: &mut core::Core, conn: &mut link::Conn) {
 }
 
 /// One reply packet per notification; shared with the shutdown flow.
+/// Backoff sleep that wakes immediately on a shutdown signal; returns
+/// true when shutdown was requested.
+async fn sleep_or_shutdown(
+    secs: u64,
+    ctrl_rx: &mut tokio::sync::mpsc::Receiver<core::Ctrl>,
+) -> bool {
+    tokio::time::timeout(std::time::Duration::from_secs(secs), ctrl_rx.recv())
+        .await
+        .unwrap_or(None)
+        .is_some()
+}
+
 async fn write_reply(core: &mut core::Core, conn: &mut link::Conn) {
     let pkt = core.next_reply();
     if conn.write_packet(&pkt).await.is_ok() {

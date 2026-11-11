@@ -40,6 +40,17 @@ impl Conn {
             Conn::Ble(c) => c.address.clone(),
         }
     }
+
+    /// Drop the underlying LE link, if any (REVIEW item 6): BlueZ keeps
+    /// a BLE connection up after the notify stream dies unless we call
+    /// Device.Disconnect, which would keep the treadmill locked against
+    /// its own phone app. A no-op for the simulator.
+    pub async fn disconnect(&mut self) {
+        match self {
+            Conn::Sim(_) => {}
+            Conn::Ble(c) => c.disconnect().await,
+        }
+    }
 }
 
 /// A connection-maker: connects (and is reconnectable by the daemon's retry loop).

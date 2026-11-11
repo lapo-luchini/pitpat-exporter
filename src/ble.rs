@@ -51,6 +51,7 @@ impl BleLink {
         tracing::debug!("notifications subscribed");
         Ok(crate::link::Conn::Ble(BleConn {
             address: dev_addr,
+            device,
             write_char: chars.write,
             io: None,
             notify: Box::pin(notify),
@@ -177,6 +178,10 @@ fn perr(err: bluer::Error) -> LinkError {
 /// A live BLE connection: notification stream + command writes.
 pub struct BleConn {
     pub address: String,
+    /// Kept so the LE link can be dropped explicitly: BlueZ keeps the
+    /// connection alive after the notify stream dies, which would block
+    /// the treadmill's own phone app (REVIEW item 6).
+    device: Device,
     write_char: Characteristic,
     /// Acquired WriteValue-without-response handle once it works.
     io: Option<CharacteristicWriter>,
@@ -184,6 +189,13 @@ pub struct BleConn {
 }
 
 impl BleConn {
+    /// Drop the LE link explicitly (shutdown, watchdog reconnect).
+    pub async fn disconnect(&mut self) {
+        if let Err(err) = self.device.disconnect().await {
+            tracing::warn!(error = %err, "BLE disconnect failed");
+        }
+    }
+
     /// Next notification's raw bytes; `Err` ⇒ the link is dead.
     pub async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
         self.notify

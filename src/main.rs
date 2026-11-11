@@ -120,12 +120,12 @@ fn main() -> ExitCode {
 fn run_daemon(cfg: config::Config) -> ExitCode {
     init_logging(&cfg);
     // a non-loopback listen without --token-file is refused (§5/§6.1)
-    let listen_host = cfg
-        .listen
-        .rsplit_once(':')
-        .map_or(cfg.listen.as_str(), |(h, _)| h);
-    let loopback = matches!(listen_host, "127.0.0.1" | "::1" | "localhost");
+    let loopback = config::is_loopback_listen(&cfg.listen);
     if !loopback && cfg.token_file.is_none() {
+        let listen_host = cfg
+            .listen
+            .rsplit_once(':')
+            .map_or(cfg.listen.as_str(), |(h, _)| h);
         eprintln!("refusing --listen {listen_host} without --token-file");
         return ExitCode::FAILURE;
     }
@@ -133,11 +133,31 @@ fn run_daemon(cfg: config::Config) -> ExitCode {
         eprintln!("{err}");
         return ExitCode::FAILURE;
     }
-    let token = cfg
-        .token_file
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|t| t.trim().to_string());
+    // a token that cannot be read must not silently disable auth
+    // (REVIEW item 3)
+    let token = match &cfg.token_file {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(t) => {
+                let t = t.trim().to_string();
+                if t.is_empty() {
+                    eprintln!(
+                        "refusing to start: --token-file {} is empty",
+                        path.display()
+                    );
+                    return ExitCode::FAILURE;
+                }
+                Some(t)
+            }
+            Err(err) => {
+                eprintln!(
+                    "refusing to start: cannot read --token-file {}: {err}",
+                    path.display()
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
 
     // current_thread keeps RSS low (§1, goal 6)
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -184,6 +204,7 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         events: events.clone(),
         token,
         listen_host: listen_host.to_string(),
+        loopback: config::is_loopback_listen(&cfg.listen),
         presets: cfg.presets.clone(),
         min_speed: cfg.min_speed,
         max_speed: cfg.max_speed,

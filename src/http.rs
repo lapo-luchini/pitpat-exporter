@@ -26,6 +26,10 @@ pub struct AppState {
     pub token: Option<String>,
     /// Host part of the configured listen address.
     pub listen_host: String,
+    /// Whether the configured listen address is loopback: strict Host
+    /// allowlist only applies there (REVIEW item 4 — on a LAN bind with
+    /// a mandatory token, any Host is accepted so phones can connect).
+    pub loopback: bool,
     pub presets: Vec<f64>,
     pub min_speed: f64,
     pub max_speed: f64,
@@ -68,14 +72,17 @@ async fn secure(
         return err_json(StatusCode::BAD_REQUEST, "missing Host header");
     };
     let host = host.to_ascii_lowercase();
-    let (ip, _port) = host.rsplit_once(':').unwrap_or((host.as_str(), ""));
-    let bare = ip.trim_start_matches('[').trim_end_matches(']');
-    let allowed = ip == state.listen_host
-        || host == state.listen_host
-        || matches!(ip, "localhost" | "127.0.0.1" | "[::1]")
-        || matches!(bare, "localhost" | "127.0.0.1" | "::1");
-    if !allowed {
-        return err_json(StatusCode::from_u16(421).unwrap(), "untrusted Host header");
+    if state.loopback {
+        // DNS-rebinding protection: on loopback the allowlist is strict
+        let (ip, _port) = host.rsplit_once(':').unwrap_or((host.as_str(), ""));
+        let bare = ip.trim_start_matches('[').trim_end_matches(']');
+        let allowed = ip == state.listen_host
+            || host == state.listen_host
+            || matches!(ip, "localhost" | "127.0.0.1" | "[::1]")
+            || matches!(bare, "localhost" | "127.0.0.1" | "::1");
+        if !allowed {
+            return err_json(StatusCode::from_u16(421).unwrap(), "untrusted Host header");
+        }
     }
 
     if method == Method::POST || method == Method::DELETE {
@@ -455,6 +462,7 @@ mod tests {
             events,
             token,
             listen_host: "127.0.0.1".into(),
+            loopback: true,
             presets: vec![2.0, 3.0, 4.0],
             min_speed: 1.0,
             max_speed: 6.0,

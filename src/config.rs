@@ -64,6 +64,21 @@ pub struct Config {
     pub log: String,
 }
 
+/// Loopback check for a `host:port` listen address (§6.1): parsed through
+/// SocketAddr so IPv6 forms like `[::1]:9839` work, plus a literal
+/// `localhost` fallback (no name resolution).
+pub fn is_loopback_listen(listen: &str) -> bool {
+    if listen == "localhost" {
+        return true;
+    }
+    match listen.parse::<std::net::SocketAddr>() {
+        Ok(addr) => addr.ip().is_loopback(),
+        Err(_) => listen
+            .rsplit_once(':')
+            .is_some_and(|(h, p)| h == "localhost" && !p.is_empty() && p.parse::<u16>().is_ok()),
+    }
+}
+
 impl Config {
     /// Validate speed bounds; presets must fit inside [min, max].
     pub fn validate(&self) -> Result<(), String> {

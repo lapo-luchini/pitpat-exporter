@@ -125,10 +125,15 @@ in
         assertion =
           cfg.listen != null
           && (
-            builtins.match "127\.0\.0\.1:.*" cfg.listen != null
-            || builtins.match "\[::1\]:.*" cfg.listen != null
-            || cfg.listen == "localhost" || cfg.tokenFile != null
+            builtins.match ''127\.0\.0\.1:.*'' cfg.listen != null
+            # POSIX ERE has no \] outside a class: use []] for a literal ]
+            || builtins.match ''\[::1[]]:.*'' cfg.listen != null
+            || builtins.match ''localhost:[0-9]+'' cfg.listen != null
+            || cfg.listen == "localhost"
+            || cfg.tokenFile != null
           );
+        # keep the loopback notion identical to the daemon's
+        # (src/config.rs is_loopback_listen, REVIEW item 5)
         message = "services.pitpat: a non-loopback listen requires services.pitpat.tokenFile";
       }
     ];

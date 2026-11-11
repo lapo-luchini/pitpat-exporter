@@ -397,10 +397,12 @@ async fn shutdown_flow(core: &mut core::Core, conn: &mut link::Conn) {
     }
     core.on_disconnect(core::DeadReason::Shutdown);
     core.persist();
-    // dropping conn disconnects
+    // BlueZ keeps the LE link up after the notify stream dies unless the
+    // Device.Disconnect goes out explicitly: the phone app would stay
+    // locked out (REVIEW round-2 A4)
+    conn.disconnect().await;
 }
 
-/// One reply packet per notification; shared with the shutdown flow.
 /// Backoff sleep that wakes immediately on a shutdown signal; returns
 /// true when shutdown was requested.
 async fn sleep_or_shutdown(
@@ -413,6 +415,7 @@ async fn sleep_or_shutdown(
         .is_some()
 }
 
+/// One reply packet per notification; shared with the shutdown flow.
 async fn write_reply(core: &mut core::Core, conn: &mut link::Conn) {
     let pkt = core.next_reply();
     if conn.write_packet(&pkt).await.is_ok() {

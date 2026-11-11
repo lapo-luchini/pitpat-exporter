@@ -233,6 +233,21 @@ impl Core {
 
     // ------------------------------------------------------------- views
 
+    /// The session as it is reported and compared: pre-reset offset plus
+    /// the currently mirrored (raw, post-reset) counters, so a distance
+    /// target set before a mid-session reset does not over-walk
+    /// (REVIEW round-2 A6).
+    fn reported_session(&self) -> Option<OpenSession> {
+        self.session.as_ref().map(|s| OpenSession {
+            distance_m: self.session_offset.distance_m + s.distance_m,
+            steps: self.session_offset.steps + s.steps,
+            kcal: self.session_offset.kcal + s.kcal,
+            duration_s: self.session_offset.duration_s + s.duration_s,
+            start: s.start,
+            max_speed_kmh: s.max_speed_kmh,
+        })
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             connected: self.state != State::Disconnected,
@@ -242,7 +257,7 @@ impl Core {
             speed_kmh: self.speed_kmh,
             target_speed_kmh: self.target_speed_kmh,
             queue_len: self.queue.len(),
-            session: self.session.clone(),
+            session: self.reported_session(),
             target: self.target,
             last_end_reason: self.last_end_reason,
             totals: self.totals.clone(),
@@ -522,7 +537,9 @@ impl Core {
     /// Auto-stop targets (§4.5): queue stop, close the session as
     /// `target_reached`, clear the target.
     fn check_targets(&mut self) {
-        let Some(s) = &self.session else { return };
+        let Some(s) = self.reported_session() else {
+            return;
+        };
         let (dist, dur) = (s.distance_m, s.duration_s);
         let hit_d = self.target.distance_m.is_some_and(|d| dist >= d);
         let hit_t = self.target.duration_s.is_some_and(|d| dur >= d);
@@ -992,6 +1009,30 @@ mod tests {
         assert_eq!(c.snapshot().last_end_reason, None);
         c.on_disconnect(DeadReason::Link);
         assert_eq!(c.snapshot().last_end_reason, Some("disconnected"));
+    }
+
+    #[test]
+    fn mid_session_reset_keeps_session_totals() {
+        // REVIEW round-2 A6: a distance target set before a mid-session
+        // counter reset must still trigger at the true walked distance —
+        // the live session view includes the pre-reset offset.
+        let dir = tmpdir("resetoff");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Running, 2.0, 30, 40, 1, 30.0));
+        assert_eq!(c.queue_api(ApiCmd::TargetSet(Some(100), None)), Ok(()));
+        // treadmill resets its counters mid-session, keeps running
+        c.on_packet(&st(p::BeltState::Running, 2.0, 0, 0, 0, 0.0));
+        let ses = c.snapshot().session.expect("session open");
+        assert_eq!(ses.distance_m, 30, "pre-reset offset reported live");
+        // keeps walking: 80 m after the reset → 30 + 80 = 110 ≥ 100
+        c.on_packet(&st(p::BeltState::Running, 2.0, 80, 120, 3, 160.0));
+        assert_eq!(c.snapshot().target, Target::default(), "target cleared");
+        assert_eq!(c.queue, VecDeque::from([WireCmd::Stop]));
+        let rec = &crate::session::read_sessions(&dir, 4)[0];
+        assert_eq!(rec.distance_m, 110, "record = offset + post-reset");
+        assert_eq!(rec.duration_s, 190.0);
     }
 
     #[test]

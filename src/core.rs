@@ -12,6 +12,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 
+/// Treadmill per-session counters (distance/steps/energy/moving time).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionCounters {
+    pub distance_m: u32,
+    pub steps: u32,
+    pub kcal: u16,
+    pub duration_s: f64,
+}
+
 /// Belt-agnostic states (§4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -169,8 +178,10 @@ pub struct Core {
     pub target_speed_kmh: f64,
     address: Option<String>,
     session: Option<OpenSession>,
-    /// Values frozen when a mid-session counter reset was observed.
-    session_bof: Option<OpenSession>,
+    /// Accumulated pre-reset counters for the open session (§4.3): when
+    /// the treadmill resets its counters mid-session, what was walked
+    /// before the reset stays in the record (REVIEW item 7).
+    session_offset: SessionCounters,
     /// End reason of the most recently closed session (for the API view).
     last_end_reason: Option<&'static str>,
     pub target: Target,
@@ -207,7 +218,7 @@ impl Core {
             target_speed_kmh,
             address: None,
             session: None,
-            session_bof: None,
+            session_offset: SessionCounters::default(),
             last_end_reason: None,
             target: Target::default(),
             queue: VecDeque::new(),
@@ -271,6 +282,18 @@ impl Core {
         matches!(self.state, State::Running | State::Paused)
     }
 
+    /// SIGTERM while moving (§4.6): end the session as `shutdown` BEFORE
+    /// queueing the stop — the treadmill's post-reset stop packet would
+    /// otherwise close it as `stopped` first (REVIEW item 7).
+    pub fn begin_shutdown(&mut self) {
+        if self.moving() {
+            self.close_session(EndReason::Shutdown);
+        }
+        self.queue.clear();
+        self.pending_write = None;
+        self.queue.push_back(WireCmd::Stop);
+    }
+
     // -------------------------------------------------------- API entry
 
     /// Queue/apply a client command; `Err` maps to HTTP 400/409/503 (§6.2).
@@ -304,8 +327,7 @@ impl Core {
                 self.forget_settle();
                 if self.state == State::Running {
                     // an explicit speed while moving means set-speed
-                    self.queue_set_speed(speed);
-                    Ok(())
+                    self.queue_set_speed(speed)
                 } else {
                     self.queue_back(WireCmd::Start(speed))
                 }
@@ -327,7 +349,7 @@ impl Core {
                 self.target_speed_kmh = v;
                 self.forget_settle();
                 if self.moving() {
-                    self.queue_set_speed(v);
+                    self.queue_set_speed(v)?;
                 }
                 Ok(())
             }
@@ -336,7 +358,7 @@ impl Core {
                 self.target_speed_kmh = v;
                 self.forget_settle();
                 if self.moving() {
-                    self.queue_set_speed(v);
+                    self.queue_set_speed(v)?;
                 }
                 Ok(())
             }
@@ -350,14 +372,13 @@ impl Core {
     }
 
     /// Consecutive set-speeds coalesce: the newer replaces the queued one.
-    fn queue_set_speed(&mut self, v: f64) {
+    fn queue_set_speed(&mut self, v: f64) -> Result<(), ApiErr> {
         if let Some(WireCmd::SetSpeed(s)) = self.queue.back_mut() {
+            // coalescing never grows the queue
             *s = v;
-        } else if self.queue.len() < QUEUE_CAP {
-            self.queue.push_back(WireCmd::SetSpeed(v));
-        } else {
-            tracing::warn!("command queue full, set-speed dropped");
+            return Ok(());
         }
+        self.queue_back(WireCmd::SetSpeed(v))
     }
 
     fn queue_back(&mut self, c: WireCmd) -> Result<(), ApiErr> {
@@ -452,18 +473,22 @@ impl Core {
             duration_s: 0.0,
             max_speed_kmh: self.speed_kmh,
         });
-        self.session_bof = None;
+        self.session_offset = SessionCounters::default();
         tracing::info!("session started");
     }
 
-    /// Mirror the treadmill's session counters; if it resets them
-    /// mid-session, freeze the last values for the record (§4.3).
+    /// Mirror the treadmill's session counters; when it resets them
+    /// mid-session, what was walked before the reset is kept as an
+    /// offset and added back into the record at the end (§4.3).
     fn update_running_session(&mut self, st: &p::Status) {
         let Some(s) = self.session.as_mut() else {
             return;
         };
         if st.distance_m < s.distance_m || st.steps < s.steps {
-            self.session_bof = Some(s.clone());
+            self.session_offset.distance_m += s.distance_m;
+            self.session_offset.steps += s.steps;
+            self.session_offset.kcal += s.kcal;
+            self.session_offset.duration_s += s.duration_s;
         }
         s.distance_m = st.distance_m;
         s.steps = st.steps;
@@ -522,17 +547,14 @@ impl Core {
             return;
         };
         self.session = None;
-        let (dist, steps, kcal, dur, max) = self
-            .session_bof
-            .take()
-            .map(|f| (f.distance_m, f.steps, f.kcal, f.duration_s, f.max_speed_kmh))
-            .unwrap_or((
-                open.distance_m,
-                open.steps,
-                open.kcal,
-                open.duration_s,
-                open.max_speed_kmh,
-            ));
+        // record = pre-reset offset + the values mirrored at close
+        let (dist, steps, kcal, dur, max) = (
+            self.session_offset.distance_m + open.distance_m,
+            self.session_offset.steps + open.steps,
+            self.session_offset.kcal + open.kcal,
+            self.session_offset.duration_s + open.duration_s,
+            open.max_speed_kmh,
+        );
         let end = now_ts();
         let avg = if dur > 0.0 {
             dist as f64 / dur * 3.6
@@ -578,7 +600,6 @@ impl Core {
         self.state = State::Disconnected;
         self.may_open = true;
         self.deltas.reset();
-        self.session_bof = None;
         self.queue.clear();
         self.pending_write = None;
         self.forget_settle();
@@ -680,7 +701,6 @@ pub async fn pump<C: Notify>(
     let mut next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
     loop {
         core.drain_api_cmds();
-        core.metrics.last_notification.set(unix_now());
 
         tokio::select! {
             ev = tokio::time::timeout(Duration::from_secs(WATCHDOG_S), conn.recv_notification()) => {

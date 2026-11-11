@@ -376,7 +376,7 @@ async fn signal_task(
 async fn shutdown_flow(core: &mut core::Core, conn: &mut link::Conn) {
     if core.moving() {
         tracing::info!("stopping the belt before exit");
-        core.queue_api(core::ApiCmd::Stop).ok();
+        core.begin_shutdown();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while core.state != core::State::Stopped {
             if std::time::Instant::now() >= deadline {

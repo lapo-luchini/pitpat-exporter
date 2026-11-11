@@ -32,7 +32,11 @@ struct SimBelt {
     /// fractional part below 1 m (counters advance <1 m per tick)
     distance_f: f64,
     steps: u32,
+    /// fractional steps/kcal: whole-unit truncation would stay at 0
+    /// forever at ~0.4 m per tick (REVIEW item 7)
+    steps_f: f64,
     kcal: u16,
+    kcal_f: f64,
     duration_s: f64,
     starting_ends_at: Option<Instant>,
     pending: Option<Command>,
@@ -73,7 +77,9 @@ impl SimBelt {
             distance_m: 0,
             distance_f: 0.0,
             steps: 0,
+            steps_f: 0.0,
             kcal: 0,
+            kcal_f: 0.0,
             duration_s: 0.0,
             starting_ends_at: None,
             pending: None,
@@ -106,7 +112,9 @@ impl SimBelt {
                 self.distance_m = 0;
                 self.distance_f = 0.0;
                 self.steps = 0;
+                self.steps_f = 0.0;
                 self.kcal = 0;
+                self.kcal_f = 0.0;
                 self.duration_s = 0.0;
             }
         }
@@ -137,9 +145,11 @@ impl SimBelt {
                 self.distance_f += metres;
                 self.distance_m = self.distance_f as u32;
                 // steps ≈ distance / 0.7 m (§4.7)
-                self.steps += (metres / 0.7) as u32;
+                self.steps_f += metres / 0.7;
+                self.steps = self.steps_f as u32;
                 // kcal ≈ 0.5 × weight_kg × km
-                self.kcal = ((self.kcal as f64) + 0.5 * weight_kg as f64 * metres / 1000.0) as u16;
+                self.kcal_f += 0.5 * weight_kg as f64 * metres / 1000.0;
+                self.kcal = self.kcal_f as u16;
                 self.duration_s += dt_s;
             }
             _ => {}

@@ -32,6 +32,8 @@ PlasmoidItem {
         last_end_reason: null
     })
     property bool busy: false
+    // guard against re-notifying the disconnect on every failed poll
+    property bool wasRunning: false
     // while the popup is open or the belt moves: 1 s, otherwise 10 s (§10)
     readonly property bool moving: ["starting", "running", "paused"].indexOf(snap.state) >= 0
     readonly property int pollInterval: root.expanded || root.moving ? 1000 : 10000

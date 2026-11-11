@@ -250,7 +250,7 @@ Item {
         }
         PlasmaComponents3.Label {
             visible: full.lastSessions.length === 0
-            text: root.working ? i18n("no sessions yet") : ""
+            text: full.working ? i18n("no sessions yet") : ""
             color: Kirigami.Theme.disabledTextColor
         }
     }

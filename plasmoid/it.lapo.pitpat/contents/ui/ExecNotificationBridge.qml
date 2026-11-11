@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 import QtQuick 2.15
-import org.kde.plasma.core as PlasmaCore
+// DataSource moved out of org.kde.plasma.core in Plasma 6 (REVIEW A5)
+import org.kde.plasma.plasma5support as P5Support
 
 /**
  * Fallback notifications: `notify-send` via the executable DataEngine,
@@ -9,7 +10,7 @@ import org.kde.plasma.core as PlasmaCore
 Item {
     id: bridge
 
-    PlasmaCore.DataSource {
+    P5Support.DataSource {
         id: exec
         engine: "executable"
         connectedSources: []

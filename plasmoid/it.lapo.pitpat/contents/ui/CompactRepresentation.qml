@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 import QtQuick 2.15
+import QtQuick.Layouts
 import org.kde.plasma.plasmoid 2.0
 import org.kde.kirigami as Kirigami
 
@@ -22,6 +23,10 @@ Item {
     Layout.minimumWidth: Kirigami.Units.gridUnit * 2
     Layout.minimumHeight: Kirigami.Units.gridUnit * 2
 
+    // touchpads send many small angleDelta events per gesture: accumulate
+    // and step once per ±120 (REVIEW round-2 A6)
+    property real wheelAccum: 0
+
     MouseArea {
         id: mouse
         anchors.fill: parent
@@ -35,11 +40,12 @@ Item {
             }
         }
         onWheel: wheel => {
-            // accept only accumulated wheel events so one notch = ±0.1
-            if (wheel.angleDelta.y === 0) {
+            wheelAccum += wheel.angleDelta.y;
+            if (Math.abs(wheelAccum) < 120) {
                 return;
             }
-            root.wheelAdjust(wheel.angleDelta.y > 0);
+            root.wheelAdjust(wheelAccum > 0);
+            wheelAccum = 0;
         }
     }
 

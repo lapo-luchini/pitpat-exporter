@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: ISC
 import QtQuick 2.15
 import org.kde.plasma.plasmoid 2.0
-import org.kde.kirigami as Kirigami
 
 /**
  * State engine shared by the compact + full representations: polls
@@ -28,35 +28,18 @@ PlasmoidItem {
         session: null,
         target: null,
         today: null,
-        lifetime: null
+        lifetime: null,
+        last_end_reason: null
     })
     property bool busy: false
     // while the popup is open or the belt moves: 1 s, otherwise 10 s (§10)
     readonly property bool moving: ["starting", "running", "paused"].indexOf(snap.state) >= 0
-    readonly property int pollInterval: Plasmoid.expanded || root.moving ? 1000 : 10000
+    readonly property int pollInterval: root.expanded || root.moving ? 1000 : 10000
 
-    // last notified milestone (integer multiple of milestoneKm)
+    // notification bookkeeping (§10)
     property int lastMilestone: 0
-    // guard against re-notifying the disconnect on every failed poll
-    property bool wasRunning: false
-    property bool loggedDaemonFail: false
-
-    // The KF6 notification module is loaded through a Loader: if the module
-    // is unavailable the widget keeps working and just logs a warning.
-    Loader {
-        id: notificationsBridgeLoader
-        source: "NotificationsBridge.qml"
-        onStatusChanged: if (status === Loader.Error) {
-            console.warn("pitpat: notification module unavailable, milestones silent");
-        }
-    }
-
-    function notify(title, text) {
-        const bridge = notificationsBridgeLoader.item;
-        if (bridge) {
-            bridge.notify(title, text);
-        }
-    }
+    property string lastSessionStart: ""
+    property string lastEndSeen: ""
 
     function refresh() {
         var xhr = new XMLHttpRequest();
@@ -87,33 +70,56 @@ PlasmoidItem {
                     address: null
                 });
                 root.wasRunning = false;
-                root.lastMilestone = 0;
             }
         };
         xhr.send();
     }
+    property bool loggedDaemonFail: false
 
     function onSnap(next) {
+        // milestone counter must follow the session, not the daemon's reach
+        // (a new session restarts at 0 km — REVIEW §1.10)
+        const start = next.session ? next.session.start : "";
+        if (start !== lastSessionStart) {
+            lastMilestone = 0;
+            lastSessionStart = start;
+        }
         root.snap = next;
+
         if (root.milestoneKm > 0 && next.session) {
             const n = Math.floor(next.session.distance_m / 1000.0 / root.milestoneKm);
             if (n >= 1 && n > root.lastMilestone) {
                 root.lastMilestone = n;
                 root.notify(
                     i18n("PitPat milestone %1", n),
-                    i18n("You walked %1 km in this session!",
-                         (n * root.milestoneKm).toFixed(2))
+                    i18n("You walked %1 km in this session!", (n * root.milestoneKm).toFixed(2))
                 );
             }
         }
-        if (root.wasRunning && next.session && next.target && next.target.distance_m
-            && next.session.distance_m >= next.target.distance_m) {
-            root.notify(i18n("PitPat target reached"), i18n("Auto-stop: the belt is stopping"));
+        // auto-stop detection: the daemon clears target and session in the
+        // same snapshot, so watch the end reason instead (REVIEW §1.9)
+        if (next.last_end_reason && next.last_end_reason !== root.lastEndSeen) {
+            if (next.last_end_reason === "target_reached") {
+                root.notify(i18n("PitPat target reached"), i18n("Auto-stop: the belt is stopping"));
+            }
+            lastEndSeen = next.last_end_reason;
         }
         if (root.wasRunning && !next.connected) {
             root.notify(i18n("PitPat disconnected"), i18n("Lost the treadmill while walking"));
         }
         root.wasRunning = next.state === "running" || next.state === "starting";
+
+        // Plasma tooltip (§10): state, speed, session distance, today
+        toolTipMainText = next.connected
+            ? i18nc("tooltip head", "%1 · %2 km/h", next.state, next.speed_kmh.toFixed(1))
+            : i18n("pitpat daemon not running");
+        const ses = next.session
+            ? i18nc("tooltip", "session: %1 km", (next.session.distance_m / 1000).toFixed(2))
+            : i18nc("tooltip empty", "no open session");
+        const today = next.today
+            ? i18nc("tooltip", "today: %1 km", (next.today.distance_m / 1000).toFixed(2))
+            : "";
+        toolTipSubText = ses + "\n" + today;
     }
 
     // POST/DELETE with the JSON media type the daemon requires (§6.1)
@@ -182,6 +188,30 @@ PlasmoidItem {
     compactRepresentation: CompactRepresentation {}
     fullRepresentation: FullRepresentation {}
     preferredRepresentation: compactRepresentation
+
+    // Notifications via the KF6 QML module; if that module (or the
+    // executable DataEngine fallback) is unavailable the widget keeps
+    // working and logs a single warning (§10).
+    Loader {
+        id: notificationLoader
+        source: "NotificationBridge.qml"
+    }
+    Loader {
+        id: execNotificationLoader
+        active: notificationLoader.status === Loader.Error
+        source: "ExecNotificationBridge.qml"
+    }
+
+    function notify(title, text) {
+        const bridge = notificationLoader.item || execNotificationLoader.item;
+        if (bridge) {
+            bridge.notify(title, text);
+        } else if (notificationLoader.status === Loader.Error) {
+            console.warn("pitpat: no notification mechanism available");
+            notificationLoader.active = false; // stop re-probing
+            execNotificationLoader.active = false;
+        }
+    }
 
     Timer {
         id: pollTimer

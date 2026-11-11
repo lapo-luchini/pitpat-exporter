@@ -1,3 +1,11 @@
-<KConfigModule>
-    <name>it.lapo.pitpat</name>
-</KConfigModule>
+// SPDX-License-Identifier: ISC
+import QtQuick
+import org.kde.plasma.configuration
+
+ConfigModel {
+    ConfigCategory {
+        name: i18n("General")
+        icon: "configure"
+        source: "configGeneral.qml"
+    }
+}

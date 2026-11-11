@@ -1,24 +1,52 @@
+// SPDX-License-Identifier: ISC
 import QtQuick 2.15
-import QtQuick.Controls as QQC
 import org.kde.plasma.plasmoid 2.0
 import org.kde.kirigami as Kirigami
 
 /**
- * Compact panel icon (§10): a standard icon greyed out when disconnected;
- * speed + session distance shown while a session is open; middle-click
- * toggles start/pause, mouse wheel adjusts ±0.1 km/h.
+ * Compact panel icon (§10): standard icon greyed out when disconnected;
+ * speed + session distance shown while a session is open (when configured
+ * and metric); middle-click toggles start/pause, mouse wheel ±0.1 km/h,
+ * left click opens the popup. The Plasma tooltip lives on the PlasmoidItem
+ * (toolTipMainText/toolTipSubText in main.qml).
  */
-Plasmoid.CompactRepresentation {
+Item {
+    id: compact
+
     readonly property bool connected: root.snap.connected
     readonly property bool hasSession: root.snap.session !== null
     readonly property real sessionKm: hasSession ? root.snap.session.distance_m / 1000.0 : 0.0
     readonly property bool showSpeed: Plasmoid.configuration.showSpeedInPanel
         && root.moving && !root.snap.imperial
 
+    Layout.minimumWidth: Kirigami.Units.gridUnit * 2
+    Layout.minimumHeight: Kirigami.Units.gridUnit * 2
+
+    MouseArea {
+        id: mouse
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        onClicked: mouse => {
+            if (mouse.button === Qt.MiddleButton) {
+                root.toggleStartPause();
+            } else if (mouse.button === Qt.LeftButton) {
+                root.expanded = !root.expanded;
+            }
+        }
+        onWheel: wheel => {
+            // accept only accumulated wheel events so one notch = ±0.1
+            if (wheel.angleDelta.y === 0) {
+                return;
+            }
+            root.wheelAdjust(wheel.angleDelta.y > 0);
+        }
+    }
+
     Item {
         id: layout
         anchors.fill: parent
-        opacity: connected ? 1 : 0.35
+        opacity: compact.connected ? 1 : 0.35
 
         Kirigami.Icon {
             id: icon
@@ -27,56 +55,22 @@ Plasmoid.CompactRepresentation {
                 left: parent.left
                 verticalCenter: parent.verticalCenter
             }
+            width: height
+            height: parent.height
         }
 
         Text {
-            text: showSpeed
+            text: compact.showSpeed
                 ? root.snap.speed_kmh.toFixed(1) + " km/h"
-                : (hasSession ? sessionKm.toFixed(2) + " km" : "")
+                : (compact.hasSession ? compact.sessionKm.toFixed(2) + " km" : "")
             color: Kirigami.Theme.textColor
             font.pixelSize: layout.height / 2.4
             visible: text.length > 0
             horizontalAlignment: Text.AlignHCenter
             anchors {
+                left: icon.right
                 right: parent.right
                 verticalCenter: parent.verticalCenter
-            }
-        }
-    }
-
-    MouseArea {
-        id: mouse
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-        anchors.fill: parent
-        onClicked: mouse => {
-            if (mouse.button === Qt.MiddleButton) {
-                root.toggleStartPause();
-            }
-        }
-        onWheel: wheel => {
-            root.wheelAdjust(wheel.angleDelta.y > 0);
-        }
-
-        // tooltip: state, speed, session distance, today's distance (§10)
-        QQC.ToolTip {
-            id: tip
-            visible: mouse.containsMouse && mouse.buttons === Qt.NoButton
-            delay: 350
-            timeout: 8000
-            text: {
-                const head = root.connected
-                    ? i18nc("tooltip head", "%1 · %2 km/h",
-                            root.snap.state, root.snap.speed_kmh.toFixed(1))
-                    : i18n("pitpat daemon not running");
-                const ses = root.hasSession
-                    ? i18nc("tooltip", "session: %1 km", sessionKm.toFixed(2))
-                    : i18nc("tooltip empty", "no open session");
-                const today = root.snap.today
-                    ? i18nc("tooltip", "today: %1 km",
-                            (root.snap.today.distance_m / 1000).toFixed(2))
-                    : "";
-                return head + "\n" + ses + "\n" + today;
             }
         }
     }

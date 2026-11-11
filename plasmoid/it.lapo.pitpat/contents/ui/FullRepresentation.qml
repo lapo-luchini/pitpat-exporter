@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: ISC
 import QtQuick 2.15
-import QtQuick.Layouts 1.15
+import QtQuick.Layouts
 import QtQuick.Controls as QQC
 import org.kde.plasma.plasmoid 2.0
 import org.kde.plasma.components 3.0 as PlasmaComponents3
@@ -8,8 +9,10 @@ import org.kde.kirigami as Kirigami
 /**
  * Full popup (§10): same information and controls as the web page, minus
  * the sessions table (only the last 3 sessions), in native Plasma style.
+ * Speed/presets stay available while the belt is merely stopped (§3.6);
+ * only a disconnected daemon or the starting ramp disables them.
  */
-Plasmoid.FullRepresentation {
+Item {
     id: full
 
     readonly property var snap: root.snap
@@ -17,8 +20,9 @@ Plasmoid.FullRepresentation {
     readonly property bool onMove: snap.state === "running"
         || snap.state === "starting"
         || snap.state === "paused"
-    readonly property bool ctlEnabled: working && !busy && snap.state !== "starting"
-        && snap.state !== "stopped"
+    // stopped still allows set-speed: it only updates the remembered
+    // target speed for the next start (§3.6)
+    readonly property bool ctlEnabled: working && !root.busy && snap.state !== "starting"
 
     property var lastSessions: []
 
@@ -59,51 +63,51 @@ Plasmoid.FullRepresentation {
 
         // state / connection chip
         PlasmaComponents3.Label {
-            text: working && onMove
+            text: full.working && full.onMove
                 ? i18nc("chip", "%1 · %2 km",
-                        snap.state,
-                        (snap.session ? snap.session.distance_m / 1000 : 0).toFixed(2))
-                : (working ? snap.state : i18n("pitpat daemon not running"))
+                        full.snap.state,
+                        (full.snap.session ? full.snap.session.distance_m / 1000 : 0).toFixed(2))
+                : (full.working ? full.snap.state : i18n("pitpat daemon not running"))
             horizontalAlignment: Text.AlignHCenter
             Layout.fillWidth: true
             font.bold: true
-            color: !working
+            color: !full.working
                 ? Kirigami.Theme.disabledTextColor
-                : snap.state === "running" ? "#2ecc71"
-                : snap.state === "paused" ? "#f1c40f"
+                : full.snap.state === "running" ? "#2ecc71"
+                : full.snap.state === "paused" ? "#f1c40f"
                 : Kirigami.Theme.textColor
         }
 
-        PlasmaComponents3.Heading {
-            level: 4
-            text: onMove ? Number(snap.speed_kmh).toFixed(1) : "–"
+        PlasmaComponents3.Label {
+            text: full.onMove ? Number(full.snap.speed_kmh).toFixed(1) : "–"
             Layout.alignment: Qt.AlignHCenter
             font.pointSize: 34
+            font.weight: Font.Bold
         }
 
         RowLayout {
             spacing: Kirigami.Units.mediumSpacing * 2
             Layout.alignment: Qt.AlignHCenter
             PlasmaComponents3.Label {
-                text: snap.session ? i18n("%1 km", (snap.session.distance_m / 1000).toFixed(2)) : "–"
+                text: full.snap.session ? i18n("%1 km", (full.snap.session.distance_m / 1000).toFixed(2)) : "–"
             }
             PlasmaComponents3.Label {
-                text: snap.session ? i18n("%1 steps", snap.session.steps) : "–"
+                text: full.snap.session ? i18n("%1 steps", full.snap.session.steps) : "–"
             }
             PlasmaComponents3.Label {
-                text: snap.session ? i18n("%1 kcal", snap.session.kcal) : "–"
+                text: full.snap.session ? i18n("%1 kcal", full.snap.session.kcal) : "–"
             }
             PlasmaComponents3.Label {
-                text: snap.session ? i18n("%1 min", Math.round(snap.session.duration_s / 60)) : "–"
+                text: full.snap.session ? i18n("%1 min", Math.round(full.snap.session.duration_s / 60)) : "–"
             }
         }
 
         // target progress
         PlasmaComponents3.Label {
-            visible: snap.target && snap.session
+            visible: full.snap.target && full.snap.session
             text: {
-                const t = snap.target;
-                const s = snap.session;
+                const t = full.snap.target;
+                const s = full.snap.session;
                 if (!t || !s) {
                     return "";
                 }
@@ -122,10 +126,10 @@ Plasmoid.FullRepresentation {
             spacing: Kirigami.Units.smallSpacing
             Layout.alignment: Qt.AlignHCenter
             PlasmaComponents3.Label {
-                text: snap.today ? i18n("today %1 km", (snap.today.distance_m / 1000).toFixed(2)) : ""
+                text: full.snap.today ? i18n("today %1 km", (full.snap.today.distance_m / 1000).toFixed(2)) : ""
             }
             PlasmaComponents3.Label {
-                text: snap.lifetime ? i18n("lifetime %1 km", (snap.lifetime.distance_m / 1000).toFixed(1)) : ""
+                text: full.snap.lifetime ? i18n("lifetime %1 km", (full.snap.lifetime.distance_m / 1000).toFixed(1)) : ""
                 color: Kirigami.Theme.disabledTextColor
             }
         }
@@ -135,30 +139,29 @@ Plasmoid.FullRepresentation {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
             PlasmaComponents3.Button {
-                display: PlasmaComponents3.ToolButton.IconOnly
-                width: height
-                icon.name: snap.state === "running" ? "media-playback-pause" : "media-playback-start"
-                enabled: working && !busy && snap.state !== "starting"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                icon.name: full.snap.state === "running" ? "media-playback-pause" : "media-playback-start"
+                enabled: full.working && !root.busy && full.snap.state !== "starting"
                 onClicked: root.toggleStartPause()
             }
             PlasmaComponents3.ToolButton {
                 text: "−0.1"
-                enabled: root.ctlEnabled
+                enabled: full.ctlEnabled
                 onClicked: root.speedDelta(-0.1)
             }
             PlasmaComponents3.ToolButton {
                 text: "+0.1"
-                enabled: root.ctlEnabled
+                enabled: full.ctlEnabled
                 onClicked: root.speedDelta(0.1)
             }
             QQC.Slider {
                 id: speedSlider
                 Layout.fillWidth: true
-                from: snap.min_speed_kmh
-                to: snap.max_speed_kmh
+                from: full.snap.min_speed_kmh
+                to: full.snap.max_speed_kmh
                 stepSize: 0.1
-                value: snap.target_speed_kmh
-                enabled: root.ctlEnabled
+                value: full.snap.target_speed_kmh
+                enabled: full.ctlEnabled
                 // send on release, as the web page does (§9)
                 onReleased: root.setSpeed(value)
             }
@@ -169,11 +172,11 @@ Plasmoid.FullRepresentation {
             spacing: Kirigami.Units.smallSpacing
             Layout.fillWidth: true
             Repeater {
-                model: snap.presets_kmh
+                model: full.snap.presets_kmh
                 PlasmaComponents3.ToolButton {
                     required property real modelData
                     text: modelData.toFixed(1).replace(/\.0$/, "")
-                    enabled: root.ctlEnabled || (full.working && snap.state !== "starting")
+                    enabled: full.ctlEnabled
                     onClicked: root.setSpeed(modelData)
                 }
             }
@@ -184,7 +187,7 @@ Plasmoid.FullRepresentation {
 
         // stop: visually distinct, always reachable while working (§9)
         PlasmaComponents3.Button {
-            enabled: working && !busy && snap.state !== "stopped"
+            enabled: full.working && !root.busy && full.snap.state !== "stopped"
             text: i18n("Stop")
             icon.name: "media-playback-stop"
             Layout.fillWidth: true

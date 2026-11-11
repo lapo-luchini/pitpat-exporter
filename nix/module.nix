@@ -36,9 +36,9 @@ in
 
     package = mkOption {
       type = types.package;
-      default = pkgs.callPackage ./package.nix { };
+      # default comes from the flake wrapper (flake.nix closes over `self`)
       defaultText = "the pitpat flake package";
-      description = "The pitpat package (defaults to the one from this flake).";
+      description = "The pitpat package.";
     };
 
     address = mkOption {
@@ -104,6 +104,11 @@ in
         type = types.bool;
         default = true;
         description = "Install the Plasma 6 plasmoid alongside the CLI.";
+      };
+      package = mkOption {
+        type = types.package;
+        defaultText = "the plasmoid from this flake";
+        description = "The plasmoid package to install.";
       };
     };
   };

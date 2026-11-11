@@ -20,7 +20,17 @@
         );
     in
     {
-      nixosModules.default = ./nix/module.nix;
+      # The module is exported as a function so its package defaults can
+      # close over this flake's builds (REVIEW item 2): a bare module
+      # would resolve `pkgs.callPackage ./package.nix { }` against the
+      # user's nixpkgs without our `src`, which fails with pkgs.src.
+      nixosModules.default =
+        { pkgs, lib, ... }:
+        {
+          imports = [ ./nix/module.nix ];
+          services.pitpat.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pitpat;
+          services.pitpat.widget.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.plasmoid;
+        };
       nixosModules.pitpat = self.nixosModules.default;
 
       packages = forAllSystems (
@@ -88,6 +98,25 @@
               nixpkgsPath = nixpkgs;
             };
           };
+
+          # REVIEW item 2: a bare `services.pitpat.enable = true` must
+          # evaluate without pinning the package explicitly.
+          module-defaults = (nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              self.nixosModules.default
+              (
+                { lib, ... }:
+                {
+                  services.pitpat.enable = true;
+                  fileSystems."/".device = "nodev";
+                  fileSystems."/".fsType = "none";
+                  boot.loader.grub.enable = false;
+                  system.stateVersion = "25.05";
+                }
+              )
+            ];
+          }).config.system.build.toplevel;
         }
       );
     };

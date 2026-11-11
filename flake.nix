@@ -81,24 +81,27 @@
             };
           };
 
-          # REVIEW item 2: a bare `services.pitpat.enable = true` must
-          # evaluate without pinning the package explicitly.
-          module-defaults = (nixpkgs.lib.nixosSystem {
-            inherit system;
-            modules = [
-              self.nixosModules.default
-              (
-                { lib, ... }:
-                {
-                  services.pitpat.enable = true;
-                  fileSystems."/".device = "nodev";
-                  fileSystems."/".fsType = "none";
-                  boot.loader.grub.enable = false;
-                  system.stateVersion = "25.05";
-                }
-              )
-            ];
-          }).config.system.build.toplevel;
+          # REVIEW round-2 A6: eval-only, no full NixOS toplevel build; a
+          # bare `services.pitpat.enable = true` must evaluate.
+          module-defaults = pkgs.writeText "module-defaults-eval" (
+            builtins.unsafeDiscardStringContext
+            (nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [
+                self.nixosModules.default
+                (
+                  { lib, ... }:
+                  {
+                    services.pitpat.enable = true;
+                    fileSystems."/".device = "nodev";
+                    fileSystems."/".fsType = "none";
+                    boot.loader.grub.enable = false;
+                    system.stateVersion = "25.05";
+                  }
+                )
+              ];
+            }).config.system.build.toplevel.drvPath
+          );
         }
       );
     };

@@ -474,6 +474,7 @@ impl Core {
             max_speed_kmh: self.speed_kmh,
         });
         self.session_offset = SessionCounters::default();
+        self.last_end_reason = None;
         tracing::info!("session started");
     }
 
@@ -542,11 +543,14 @@ impl Core {
 
     /// End the open session (any reason) and append it, unless noise (§4.3).
     fn close_session(&mut self, reason: EndReason) {
-        self.last_end_reason = Some(reason.as_str());
         let Some(open) = self.session.clone() else {
+            // no session open: do not overwrite the last real end reason
+            // (a treadmill stopped-packet arrives on every disconnect too,
+            // REVIEW round-2 A1)
             return;
         };
         self.session = None;
+        self.last_end_reason = Some(reason.as_str());
         // record = pre-reset offset + the values mirrored at close
         let (dist, steps, kcal, dur, max) = (
             self.session_offset.distance_m + open.distance_m,
@@ -976,6 +980,18 @@ mod tests {
         // a later stop notification must not ghost a second session
         c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
         assert_eq!(crate::session::read_sessions(&dir, 10).len(), 1);
+        // the end reason stays target_reached no matter how many stopped
+        // packets follow (REVIEW round-2 A1): the widget's 1 s poll must
+        // not miss it
+        assert_eq!(c.snapshot().last_end_reason, Some("target_reached"));
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        assert_eq!(c.snapshot().last_end_reason, Some("target_reached"));
+        // a fresh session clears it again (contract: empty while open)
+        c.on_packet(&st(p::BeltState::Running, 2.0, 1, 2, 0, 1.0));
+        assert_eq!(c.snapshot().last_end_reason, None);
+        c.on_disconnect(DeadReason::Link);
+        assert_eq!(c.snapshot().last_end_reason, Some("disconnected"));
     }
 
     #[test]

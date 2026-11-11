@@ -126,6 +126,9 @@ pub struct Snapshot {
     pub queue_len: usize,
     pub session: Option<OpenSession>,
     pub target: Target,
+    /// Why the last session ended (empty while a session is open); lets
+    /// remote clients detect auto-stop transitions (§10 widgets).
+    pub last_end_reason: Option<&'static str>,
     /// Lifetime totals ride along for the state endpoint.
     pub totals: Totals,
 }
@@ -168,6 +171,8 @@ pub struct Core {
     session: Option<OpenSession>,
     /// Values frozen when a mid-session counter reset was observed.
     session_bof: Option<OpenSession>,
+    /// End reason of the most recently closed session (for the API view).
+    last_end_reason: Option<&'static str>,
     pub target: Target,
     queue: VecDeque<WireCmd>,
     /// Packet awaiting retry after a failed write (§3.5).
@@ -203,6 +208,7 @@ impl Core {
             address: None,
             session: None,
             session_bof: None,
+            last_end_reason: None,
             target: Target::default(),
             queue: VecDeque::new(),
             pending_write: None,
@@ -227,6 +233,7 @@ impl Core {
             queue_len: self.queue.len(),
             session: self.session.clone(),
             target: self.target,
+            last_end_reason: self.last_end_reason,
             totals: self.totals.clone(),
         }
     }
@@ -510,6 +517,7 @@ impl Core {
 
     /// End the open session (any reason) and append it, unless noise (§4.3).
     fn close_session(&mut self, reason: EndReason) {
+        self.last_end_reason = Some(reason.as_str());
         let Some(open) = self.session.clone() else {
             return;
         };

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: ISC
 {
   description = "pitpat: BLE control + Prometheus export for PitPat walking-pads (NixOS module included)";
 
@@ -38,7 +39,7 @@
         {
           pitpat = pkgs.callPackage ./nix/package.nix { src = self; };
           plasmoid = pkgs.callPackage ./nix/plasmoid.nix { };
-          default = self.packages.${pkgs.system}.pitpat;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.pitpat;
         }
       );
 
@@ -62,27 +63,8 @@
       checks = forAllSystems (
         { system, pkgs }:
         let
-          # Host pkgs with a test-driver patch: under software emulation
-          # (no KVM on every builder) the guest clock runs slower than the
-          # host's, and the driver's hardcoded 5-min boot window expires
-          # before systemd finishes. Give it 30 min (60 × 30 s).
-          hostPkgs = pkgs.extend (
-            final: prev: {
-              nixos-test-driver = prev.nixos-test-driver.overrideAttrs (
-                old: {
-                  postInstall =
-                    (old.postInstall or "")
-                    + ''
-                      f=$(find $out/lib -path "*test_driver/machine/__init__.py")
-                      sed -i "s/for _ in range(10):/for _ in range(60):/" "$f"
-                    '';
-                }
-              );
-            }
-          );
           nixosLib = import (nixpkgs + "/nixos/lib/testing-python.nix") {
-            inherit system;
-            pkgs = hostPkgs;
+            inherit system pkgs;
           };
         in
         {

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: ISC -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -142,9 +143,13 @@ $('tset').onclick=()=>{
 };
 $('tclear').onclick=()=>api('/api/target',null,'DELETE');
 
-let preset_btns=[];
+let preset_key='';
 function presets(list){
-  if(JSON.stringify(list)===preset_btns.map(x=>x.label).join(','))return;
+  // compare like with like (REVIEW item 8): the buttons' labels are
+  // numbers formatted by toFixed, so rebuild the key the same way
+  const key=(list||[]).map(v=>Number(v).toFixed(1).replace(/\.0$/,'')).join(',');
+  if(key===preset_key)return;
+  preset_key=key;
   $('presets').innerHTML='';
   (list||[]).forEach(v=>{
     const b=document.createElement('button');
@@ -152,7 +157,6 @@ function presets(list){
     b.onclick=()=>api('/api/speed',{speed_kmh:v});
     $('presets').appendChild(b);
   });
-  preset_btns=[].map.call($('presets').children,x=>({label:x.textContent}));
 }
 
 async function sessions(){

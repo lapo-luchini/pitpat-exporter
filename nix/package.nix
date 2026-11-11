@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: ISC
 {
   lib,
   rustPlatform,
@@ -32,7 +33,7 @@ rustPlatform.buildRustPackage {
       walked), a JSON control API, and a simulator mode; plus CLI subcommands
       for scripting and KDE global shortcuts.
     '';
-    homepage = "https://github.com/KeiranY/PitPat-WebBT";
+    homepage = "https://github.com/lapo-luchini/pitpat-exporter";
     license = licenses.isc;
     mainProgram = "pitpat";
     platforms = platforms.linux;

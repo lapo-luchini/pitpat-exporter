@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: ISC
 # NixOS VM test (§11): the daemon runs against the built-in simulator;
 # /healthz answers, /metrics contains the lifetime counter, and
 # POST /api/start takes the state to `running`.
@@ -12,9 +13,6 @@
 
 {
   name = "pitpat-simulate";
-
-  # run QEMU without hardware KVM (works on any builder; slower)
-  requiredFeatures.kvm = false;
 
   nodes.machine =
     { ... }:

@@ -314,6 +314,7 @@ fn queue(
         return Err((StatusCode::SERVICE_UNAVAILABLE, "command queue full"));
     }
     match state.api_tx.try_send(cmd) {
+        // §6.2: 202 {"queued": true}
         Ok(()) => Ok(serde_json::json!({ "queued": true })),
         Err(mpsc::error::TrySendError::Full(_)) => {
             Err((StatusCode::SERVICE_UNAVAILABLE, "command queue full"))
@@ -326,7 +327,7 @@ fn queue(
 
 fn respond(r: Result<serde_json::Value, (StatusCode, &'static str)>) -> Response {
     match r {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => (StatusCode::ACCEPTED, Json(v)).into_response(),
         Err((code, msg)) => err_json(code, msg),
     }
 }
@@ -568,7 +569,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.status(), StatusCode::ACCEPTED, "§6.2: 202");
         let body = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
         assert!(String::from_utf8_lossy(&body).contains("queued"));
     }
@@ -601,7 +602,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.status(), StatusCode::ACCEPTED, "§6.2: 202");
         // GETs are read-only: no token needed
         let app = router(mkstate(Some("secret".into()), &dir));
         let res = app

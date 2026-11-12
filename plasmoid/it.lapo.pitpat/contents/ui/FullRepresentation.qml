@@ -162,8 +162,15 @@ Item {
                 stepSize: 0.1
                 value: full.snap.target_speed_kmh
                 enabled: full.ctlEnabled
-                // send on release, as the web page does (§9)
-                onReleased: root.setSpeed(value)
+                // send when the drag stops, as the web page does (§9):
+                // QQC2's Slider has no released signal, only moved(), so
+                // the send is debounced 250 ms after the last change
+                onMoved: sliderSend.restart()
+            }
+            Timer {
+                id: sliderSend
+                interval: 250
+                onTriggered: root.setSpeed(speedSlider.value)
             }
         }
 

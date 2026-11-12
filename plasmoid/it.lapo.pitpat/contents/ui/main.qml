@@ -42,6 +42,10 @@ PlasmoidItem {
     property int lastMilestone: 0
     property string lastSessionStart: ""
     property string lastEndSeen: ""
+    // the first successful poll baselines lastEndSeen without notifying
+    // (REVIEW round-3 B1): a widget restart must not re-announce a stale
+    // end reason
+    property bool endSeenBaseline: false
 
     function refresh() {
         var xhr = new XMLHttpRequest();
@@ -99,8 +103,15 @@ PlasmoidItem {
             }
         }
         // auto-stop detection: the daemon clears target and session in the
-        // same snapshot, so watch the end reason instead (REVIEW §1.9)
-        if (next.last_end_reason && next.last_end_reason !== root.lastEndSeen) {
+        // same snapshot, so watch the end reason instead (REVIEW §1.9).
+        // null clears the seen-marker so two consecutive target_reached
+        // sessions both notify (REVIEW round-3 B1).
+        if (!endSeenBaseline) {
+            endSeenBaseline = true;
+            lastEndSeen = next.last_end_reason || "";
+        } else if (!next.last_end_reason) {
+            lastEndSeen = "";
+        } else if (next.last_end_reason !== lastEndSeen) {
             if (next.last_end_reason === "target_reached") {
                 root.notify(i18n("PitPat target reached"), i18n("Auto-stop: the belt is stopping"));
             }

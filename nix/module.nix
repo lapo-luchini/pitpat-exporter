@@ -20,6 +20,7 @@ let
       concatMapStringsSep "," toString cfg.presets
     }"
     ++ optional cfg.simulate "--simulate"
+    ++ [ "--idle-timeout ${toString cfg.idleTimeout}" ]
     ++ [ "--listen ${escapeShellArg cfg.listen}" ]
     ++ optionals (cfg.tokenFile != null) [
       # carried by LoadCredential into the service's credential directory
@@ -96,6 +97,16 @@ in
       type = types.bool;
       default = false;
       description = "Run against the built-in simulator instead of real Bluetooth.";
+    };
+
+    idleTimeout = mkOption {
+      type = types.ints.u32;
+      default = 300;
+      description = ''
+        Disconnect after this many seconds stopped with no API activity and
+        sleep until a control call wakes the daemon; 0 keeps the link up
+        permanently (§4.5a).
+      '';
     };
 
     extraArgs = mkOption {

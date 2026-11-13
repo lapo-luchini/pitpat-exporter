@@ -431,8 +431,18 @@ async fn api_connect(AxState(state): AxState<SharedState>) -> Response {
     respond(queue(&state, ApiCmd::Connect, false))
 }
 
-/// §4.5a: drop the link now; 409 while the belt is moving.
+/// §4.5a: drop the link now; 409 while the belt is moving. The check
+/// must happen here against the snapshot: the drain in the pump cannot
+/// report a rejection back to the client (it already got 202).
 async fn api_sleep(AxState(state): AxState<SharedState>) -> Response {
+    if let Some(snap) = current(&state) {
+        if snap.state == crate::core::State::Starting
+            || snap.state == crate::core::State::Running
+            || snap.state == crate::core::State::Paused
+        {
+            return err_json(StatusCode::CONFLICT, "belt is moving");
+        }
+    }
     respond(queue(&state, ApiCmd::Sleep, false))
 }
 

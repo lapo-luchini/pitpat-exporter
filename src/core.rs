@@ -439,7 +439,7 @@ impl Core {
         tracing::debug!(
             bytes = %hex(raw),
             state = ?st.belt_state(),
-            speed_kmh = self.speed_kmh,
+            speed_kmh = st.speed_mps * 3.6,
             "status notification"
         );
 

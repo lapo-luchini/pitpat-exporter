@@ -5,7 +5,7 @@ and export its data as Prometheus metrics — most importantly **the distance wa
 both for the current session and as a lifetime counter.
 
 Protocol reverse-engineering credit: the [PitPat-WebBT](https://github.com/KeiranY/PitPat-WebBT)
-project (`treadmill.js`); everything needed is documented in [`SPEC.md`](SPEC.md) §3.
+project (`treadmill.js`).
 
 ## Components
 

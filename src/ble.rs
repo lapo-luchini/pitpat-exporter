@@ -32,7 +32,7 @@ impl BleLink {
     pub async fn connect(&mut self) -> Result<crate::link::Conn, LinkError> {
         let session = Session::new().await.map_err(perr)?;
         let adapter = match &self.adapter_name {
-            Some(name) => session.adapter(name).map_err(perr)?,
+            Some(sel) => find_adapter(&session, sel).await?,
             None => session.default_adapter().await.map_err(perr)?,
         };
         adapter.set_powered(true).await.map_err(perr)?;
@@ -61,6 +61,31 @@ impl BleLink {
 struct FoundChar {
     write: Characteristic,
     notify: Characteristic,
+}
+
+/// Resolve `--adapter` on every attempt, by name (`hci0`) or by the
+/// controller's MAC address. Names are not stable: after a controller
+/// reset BlueZ can re-register the same adapter as a different `hciN`, and
+/// a pinned name then fails forever with "object not present". When it is
+/// missing, say which adapters do exist.
+async fn find_adapter(session: &Session, sel: &str) -> Result<Adapter, LinkError> {
+    let mut seen = Vec::new();
+    for name in session.adapter_names().await.map_err(perr)? {
+        let adapter = session.adapter(&name).map_err(perr)?;
+        let addr = adapter.address().await.map_err(perr)?;
+        if name == sel || addr.to_string().eq_ignore_ascii_case(sel) {
+            return Ok(adapter);
+        }
+        seen.push(format!("{name} ({addr})"));
+    }
+    let seen = if seen.is_empty() {
+        "none".to_string()
+    } else {
+        seen.join(", ")
+    };
+    Err(LinkError::Dead(format!(
+        "adapter {sel} not present; available: {seen}"
+    )))
 }
 
 /// Pinned address: discover until BlueZ reports the exact device.

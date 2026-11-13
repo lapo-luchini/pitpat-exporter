@@ -51,7 +51,11 @@ in
     adapter = mkOption {
       type = types.nullOr types.str;
       default = null;
-      description = "Adapter, e.g. hci0; null = BlueZ default adapter.";
+      description = ''
+        Bluetooth adapter: a name such as "hci0", or the controller's MAC address
+        (see `bluetoothctl list`). Prefer the MAC: hciN names can change when a
+        controller resets. null = BlueZ default adapter.
+      '';
     };
 
     listen = mkOption {

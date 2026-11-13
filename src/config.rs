@@ -19,7 +19,8 @@ pub struct Config {
     #[arg(long, env = "PITPAT_TOKEN_FILE")]
     pub token_file: Option<PathBuf>,
 
-    /// BlueZ adapter name (e.g. hci0); default = BlueZ default adapter.
+    /// BlueZ adapter: name (e.g. hci0) or controller MAC address, which is
+    /// stable across controller resets; default = BlueZ default adapter.
     #[arg(long, env = "PITPAT_ADAPTER")]
     pub adapter: Option<String>,
 

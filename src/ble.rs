@@ -4,8 +4,8 @@
 
 use crate::link::LinkError;
 use crate::protocol::{NOTIFY_UUID, SERVICE_UUID, WRITE_UUID};
-use bluer::gatt::CharacteristicWriter;
-use bluer::gatt::remote::Characteristic;
+use bluer::gatt::WriteOp;
+use bluer::gatt::remote::{Characteristic, CharacteristicWriteRequest};
 use bluer::{Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Session};
 use futures::{Stream, StreamExt, pin_mut};
 use std::collections::HashSet;
@@ -53,7 +53,6 @@ impl BleLink {
             address: dev_addr,
             device,
             write_char: chars.write,
-            io: None,
             notify: Box::pin(notify),
         }))
     }
@@ -183,8 +182,6 @@ pub struct BleConn {
     /// the treadmill's own phone app (REVIEW item 6).
     device: Device,
     write_char: Characteristic,
-    /// Acquired WriteValue-without-response handle once it works.
-    io: Option<CharacteristicWriter>,
     notify: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
 }
 
@@ -204,32 +201,26 @@ impl BleConn {
             .ok_or_else(|| LinkError::Dead("notification stream ended".into()))
     }
 
-    /// Write a command/heartbeat packet. `write()` (with response) is the
-    /// default; before declaring failure we try an acquired
-    /// write-without-response IO handle once the characteristic offers one.
+    /// Write a command/heartbeat packet as an ATT Write Request (with
+    /// response). The treadmill's fba1 characteristic is `[read, write]`
+    /// and silently ignores Write Commands (without response), which is
+    /// what bluer's plain `write()` sends: its default `WriteOp` is
+    /// `Command`. Write Commands are kept only as a fallback for a
+    /// firmware that rejects requests.
     pub async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
-        if self.io.is_none() {
-            match self.write_char.write(pkt).await {
-                Ok(()) => return Ok(()),
-                Err(err) => match self.write_char.write_io().await {
-                    Ok(w) => {
-                        self.io = Some(w);
-                        tracing::debug!("switched to write-without-response IO");
-                    }
-                    Err(_) => return Err(perr(err)),
-                },
-            }
-        }
-        use tokio::io::AsyncWriteExt;
-        let res = {
-            let w = self.io.as_mut().expect("io set by the branch above");
-            AsyncWriteExt::write(w, pkt).await
+        let request = CharacteristicWriteRequest {
+            op_type: WriteOp::Request,
+            ..Default::default()
         };
-        match res {
-            Ok(_) => Ok(()),
+        match self.write_char.write_ext(pkt, &request).await {
+            Ok(()) => Ok(()),
             Err(err) => {
-                self.io = None;
-                Err(LinkError::Dead(format!("write IO failed: {err}")))
+                tracing::debug!(error = %err, "write request failed, trying write command");
+                let command = CharacteristicWriteRequest {
+                    op_type: WriteOp::Command,
+                    ..Default::default()
+                };
+                self.write_char.write_ext(pkt, &command).await.map_err(perr)
             }
         }
     }

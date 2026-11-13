@@ -198,6 +198,6 @@ in
     # pitpat on PATH so the CLI can serve global shortcuts (§8.1)
     environment.systemPackages =
       [ cfg.package ]
-      ++ optional cfg.widget.enable (pkgs.callPackage ./plasmoid.nix { });
+      ++ optional cfg.widget.enable cfg.widget.package;
   };
 }

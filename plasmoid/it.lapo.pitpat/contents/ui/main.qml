@@ -84,11 +84,16 @@ PlasmoidItem {
 
     function onSnap(next) {
         // milestone counter must follow the session, not the daemon's reach
-        // (a new session restarts at 0 km — REVIEW §1.10)
+        // (a new session restarts at 0 km — REVIEW §1.10). On the first
+        // snapshot after a widget (re)start the counter baselines from the
+        // session already in progress, so a milestone walked before the
+        // restart is not re-announced (REVIEW round-5 optional).
         const start = next.session ? next.session.start : "";
         if (start !== lastSessionStart) {
-            lastMilestone = 0;
             lastSessionStart = start;
+            root.lastMilestone = next.session && root.milestoneKm > 0
+                ? Math.floor(next.session.distance_m / 1000.0 / root.milestoneKm)
+                : 0;
         }
         root.snap = next;
 

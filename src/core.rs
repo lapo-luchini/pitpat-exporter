@@ -25,6 +25,9 @@ pub struct SessionCounters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Disconnected,
+    /// On-demand link down by choice (§4.5a): no reconnects, any control
+    /// call wakes the daemon.
+    Sleeping,
     Stopped,
     Starting,
     Running,
@@ -35,6 +38,7 @@ impl State {
     pub fn as_str(self) -> &'static str {
         match self {
             State::Disconnected => "disconnected",
+            State::Sleeping => "sleeping",
             State::Stopped => "stopped",
             State::Starting => "starting",
             State::Running => "running",
@@ -92,12 +96,16 @@ pub enum ApiCmd {
     Preset(usize),
     TargetSet(Option<u32>, Option<f64>),
     TargetClear,
+    /// §4.5a: bring the link up without queueing a belt command.
+    Connect,
+    /// §4.5a: drop the link now (409 while moving).
+    Sleep,
 }
 
 /// Rejection of a client command (mapping in http.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiErr {
-    /// 409: not connected.
+    /// 409: not connected (or the belt is moving where that's required).
     Disabled,
     /// 400: bad request.
     BadRequest(&'static str),
@@ -148,6 +156,10 @@ pub enum DeadReason {
     Link,
     Watchdog,
     Shutdown,
+    /// §4.5a: stopped idle for --idle-timeout, disconnect on purpose.
+    Idle,
+    /// §4.5a: POST /api/sleep while connected-and-stopped.
+    Sleep,
 }
 
 /// Control messages from signal tasks into the pump.
@@ -163,6 +175,13 @@ pub const QUEUE_CAP: usize = 8;
 pub const WATCHDOG_S: u64 = 10;
 /// Periodic totals.json flush while running (§4.4).
 pub const PERSIST_S: u64 = 60;
+/// §4.5a: a wake must have the link up within this budget, or the queued
+/// command is dropped and the daemon goes back to sleep.
+pub const WAKE_BUDGET_S: u64 = 30;
+/// §4.5a: late-connect crediting caps (a remote-started walk the daemon
+/// slept through is credited once, but absurd values are clamped).
+pub const LATE_CREDIT_MAX_M: u32 = 20_000;
+pub const LATE_CREDIT_MAX_STEPS: u32 = 30_000;
 
 pub struct Core {
     pub cfg: crate::config::DaemonCfg,
@@ -173,6 +192,20 @@ pub struct Core {
     /// Open a session on the next running packet (first running after
     /// stopped/disconnected, §4.3); paused/starting never open one.
     may_open: bool,
+    /// §4.5a: when the belt has been stopped since this instant (and no
+    /// control call happened), the link may go to sleep.
+    idle_since: Option<tokio::time::Instant>,
+    /// §4.5a: set by a control call while sleeping; the daemon wakes.
+    wake_requested: bool,
+    /// §4.5a: set by POST /api/sleep; the pump drops the link.
+    sleep_requested: bool,
+    /// §4.5a: a wake-from-sleep connect expects the first packet to
+    /// describe a belt possibly started with the remote: credit its
+    /// counters to the lifetime totals once.
+    expect_late_credit: bool,
+    /// §4.5a: counters credited for the late-connect session, used to
+    /// seed the session when it opens.
+    pending_credit: Option<SessionCounters>,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -213,6 +246,11 @@ impl Core {
             deltas: DeltaTracker::new(),
             state: State::Disconnected,
             may_open: true,
+            idle_since: None,
+            wake_requested: false,
+            sleep_requested: false,
+            expect_late_credit: false,
+            pending_credit: None,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -250,7 +288,7 @@ impl Core {
 
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
-            connected: self.state != State::Disconnected,
+            connected: self.linked(),
             address: self.address.clone(),
             state: self.state,
             imperial: self.imperial,
@@ -336,7 +374,23 @@ impl Core {
                 Ok(())
             }
             _ if self.state == State::Disconnected => Err(ApiErr::Disabled),
+            ApiCmd::Connect => {
+                // waking with no belt command: the daemon sees the request
+                self.wake_requested = true;
+                Ok(())
+            }
+            ApiCmd::Sleep => {
+                if self.moving() {
+                    return Err(ApiErr::Disabled);
+                }
+                self.sleep_requested = true;
+                Ok(())
+            }
             ApiCmd::Start(s) => {
+                if self.state == State::Sleeping {
+                    self.wake_requested = true;
+                }
+                self.idle_since = Some(tokio::time::Instant::now());
                 let speed = self.clamp(s.unwrap_or(self.target_speed_kmh));
                 self.target_speed_kmh = speed;
                 self.forget_settle();
@@ -348,10 +402,18 @@ impl Core {
                 }
             }
             ApiCmd::Pause => {
+                if self.state == State::Sleeping {
+                    self.wake_requested = true;
+                }
+                self.idle_since = Some(tokio::time::Instant::now());
                 self.forget_settle();
                 self.queue_back(WireCmd::Pause)
             }
             ApiCmd::Stop => {
+                if self.state == State::Sleeping {
+                    self.wake_requested = true;
+                }
+                self.idle_since = Some(tokio::time::Instant::now());
                 // stop must never wait behind anything (§3.5)
                 self.queue.clear();
                 self.pending_write = None;
@@ -360,6 +422,10 @@ impl Core {
                 Ok(())
             }
             ApiCmd::SpeedAbs(v) => {
+                if self.state == State::Sleeping {
+                    self.wake_requested = true;
+                }
+                self.idle_since = Some(tokio::time::Instant::now());
                 let v = self.clamp(v);
                 self.target_speed_kmh = v;
                 self.forget_settle();
@@ -369,6 +435,10 @@ impl Core {
                 Ok(())
             }
             ApiCmd::SpeedDelta(d) => {
+                if self.state == State::Sleeping {
+                    self.wake_requested = true;
+                }
+                self.idle_since = Some(tokio::time::Instant::now());
                 let v = self.clamp(self.target_speed_kmh + d);
                 self.target_speed_kmh = v;
                 self.forget_settle();
@@ -462,6 +532,7 @@ impl Core {
         }
 
         let belt = State::from(st.belt_state());
+        self.late_credit(&st, belt);
         self.begin_session_if_needed(belt);
         if belt != State::Stopped {
             // a Stopped packet carries the treadmill's post-reset counters
@@ -477,8 +548,68 @@ impl Core {
         if self.state == State::Stopped {
             self.close_session(EndReason::Stopped);
         }
+        // §4.5a: the idle clock runs while the belt is stopped
+        if belt == State::Stopped {
+            if self.idle_since.is_none() {
+                self.idle_since = Some(tokio::time::Instant::now());
+            }
+        } else {
+            self.idle_since = None;
+        }
         self.check_targets();
         self.publish();
+    }
+
+    /// §4.5a: the first packet of a wake-from-sleep connection may show a
+    /// belt the daemon never saw being started (remote start): credit its
+    /// counters to the lifetime totals once (capped), and seed the session
+    /// that is about to open with them.
+    fn late_credit(&mut self, st: &p::Status, belt: State) {
+        if !self.expect_late_credit || self.session.is_some() {
+            return;
+        }
+        self.expect_late_credit = false;
+        if !matches!(belt, State::Running | State::Paused) {
+            return;
+        }
+        let capped = SessionCounters {
+            distance_m: st.distance_m.min(LATE_CREDIT_MAX_M),
+            steps: st.steps.min(LATE_CREDIT_MAX_STEPS),
+            kcal: st.kcal,
+            duration_s: st.duration_s,
+        };
+        if capped.distance_m < st.distance_m || capped.steps < st.steps {
+            tracing::warn!(
+                distance_m = st.distance_m,
+                steps = st.steps,
+                "late-connect counters exceed the cap, clamped"
+            );
+        }
+        if capped.distance_m == 0
+            && capped.steps == 0
+            && capped.kcal == 0
+            && capped.duration_s == 0.0
+        {
+            return; // nothing to credit
+        }
+        tracing::info!(
+            distance_m = capped.distance_m,
+            steps = capped.steps,
+            kcal = capped.kcal,
+            duration_s = capped.duration_s,
+            "crediting a remote-started walk that happened while sleeping"
+        );
+        self.totals.distance_m += u64::from(capped.distance_m);
+        self.totals.steps += u64::from(capped.steps);
+        self.totals.kcal += u64::from(capped.kcal);
+        self.totals.moving_s += capped.duration_s;
+        self.metrics.bump_totals(
+            capped.distance_m,
+            capped.steps,
+            u32::from(capped.kcal),
+            capped.duration_s,
+        );
+        self.pending_credit = Some(capped);
     }
 
     /// A session starts on the first running after stopped/disconnected.
@@ -487,12 +618,13 @@ impl Core {
             return;
         }
         self.may_open = false;
+        let credit = self.pending_credit.take().unwrap_or_default();
         self.session = Some(OpenSession {
             start: now_ts(),
-            distance_m: 0,
-            steps: 0,
-            kcal: 0,
-            duration_s: 0.0,
+            distance_m: credit.distance_m,
+            steps: credit.steps,
+            kcal: credit.kcal,
+            duration_s: credit.duration_s,
             max_speed_kmh: self.speed_kmh,
         });
         self.session_offset = SessionCounters::default();
@@ -632,8 +764,9 @@ impl Core {
         self.pending_write = None;
         self.forget_settle();
         let end_reason = match reason {
-            DeadReason::Link | DeadReason::Watchdog => EndReason::Disconnected,
+            DeadReason::Link | DeadReason::Watchdog | DeadReason::Idle => EndReason::Disconnected,
             DeadReason::Shutdown => EndReason::Shutdown,
+            DeadReason::Sleep => EndReason::Disconnected,
         };
         self.close_session(end_reason);
         self.persist();
@@ -647,8 +780,71 @@ impl Core {
         self.deltas.reset();
         // first running after the (re)connect opens a session (§4.3)
         self.may_open = true;
+        // a plain reconnect's first packet is a continuation baseline, not
+        // a remote-started walk to credit (§4.4 vs §4.5a)
+        self.expect_late_credit = false;
+        self.pending_credit = None;
         self.forget_settle();
         self.publish();
+    }
+
+    // ---------------------------------------------------- §4.5a sleep
+
+    /// Is the daemon holding a live link (not sleeping, not dead)?
+    pub fn linked(&self) -> bool {
+        !matches!(self.state, State::Disconnected | State::Sleeping)
+    }
+
+    /// §4.5a: when the belt is stopped, the instant at which the idle
+    /// timer runs out, if ever.
+    pub fn idle_deadline(&self) -> Option<tokio::time::Instant> {
+        if self.cfg.idle_timeout == 0 || !self.linked() {
+            return None;
+        }
+        self.idle_since
+            .map(|t| t + Duration::from_secs(self.cfg.idle_timeout))
+    }
+
+    /// §4.5a: disconnect on purpose and stop trying. No session is open
+    /// (sleeping only happens from `stopped`), deltas re-baseline on wake.
+    pub fn enter_sleep(&mut self) {
+        self.state = State::Sleeping;
+        self.deltas.reset();
+        self.queue.clear();
+        self.pending_write = None;
+        self.forget_settle();
+        self.wake_requested = false;
+        self.sleep_requested = false;
+        self.idle_since = None;
+        // a remote-started walk during sleep must be credited at wake
+        self.expect_late_credit = true;
+        self.pending_credit = None;
+        self.publish();
+    }
+
+    pub fn take_wake(&mut self) -> bool {
+        std::mem::take(&mut self.wake_requested)
+    }
+
+    /// §4.5a: mark the next connection as wake-from-sleep, so its first
+    /// packet may credit a remote-started walk (unlike a plain reconnect).
+    pub fn arm_late_credit(&mut self) {
+        self.expect_late_credit = true;
+    }
+
+    pub fn take_sleep(&mut self) -> bool {
+        std::mem::take(&mut self.sleep_requested)
+    }
+
+    /// §4.5a: a wake that timed out drops the command that caused it.
+    pub fn drop_queued(&mut self) {
+        self.queue.clear();
+        self.pending_write = None;
+    }
+
+    /// §4.5a: the sleeping wait loop pulls client commands from here.
+    pub async fn wait_wake_cmd(&mut self) -> Option<ApiCmd> {
+        self.inbox.recv().await
     }
 
     // ------------------------------------------- heartbeat / reply side
@@ -740,19 +936,38 @@ pub async fn pump<C: Notify>(
     // an earlier two-price sleep arm caused the recreated timer to restart
     // and starve notifications forever.
     let mut next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
+    let mut last_notification = tokio::time::Instant::now();
     loop {
         core.drain_api_cmds();
-
+        if core.take_sleep() {
+            // §4.5a: POST /api/sleep while connected and stopped
+            return DeadReason::Sleep;
+        }
+        // whichever comes first: the liveness watchdog or the idle
+        // timeout (§4.5a). The notification future is recreated every
+        // pass, which is safe only because this timeout is never shorter
+        // than the notification period (watchdog 10 s; idle ≥ stopped
+        // period); an earlier 200 ms tick arm starved notifications.
+        let watchdog_at = last_notification + Duration::from_secs(WATCHDOG_S);
+        let at = core
+            .idle_deadline()
+            .map_or(watchdog_at, |idle_at| idle_at.min(watchdog_at));
+        let wait = at.saturating_duration_since(tokio::time::Instant::now());
         tokio::select! {
-            ev = tokio::time::timeout(Duration::from_secs(WATCHDOG_S), conn.recv_notification()) => {
+            ev = tokio::time::timeout(wait, conn.recv_notification()) => {
                 let raw = match ev {
                     Ok(Ok(raw)) => raw,
                     Ok(Err(_)) => return DeadReason::Link,
                     Err(_) => {
+                        if core.idle_deadline().is_some_and(|d| d <= at) {
+                            tracing::info!(idle_s = core.cfg.idle_timeout, "idle timeout, sleeping");
+                            return DeadReason::Idle;
+                        }
                         tracing::warn!(secs = WATCHDOG_S, "no notification, forcing reconnect");
                         return DeadReason::Watchdog;
                     }
                 };
+                last_notification = tokio::time::Instant::now();
                 core.on_packet(&raw);
                 core.drain_api_cmds();
                 write_reply(core, conn).await;
@@ -796,10 +1011,16 @@ mod tests {
     }
 
     fn mkcore(dir: &std::path::Path) -> T {
+        mkcore_with_idle(dir, 300)
+    }
+
+    fn mkcore_with_idle(dir: &std::path::Path, idle_timeout: u64) -> T {
         let (events, _ev_rx) = tokio::sync::broadcast::channel(8);
         let (_, api_rx) = mpsc::channel(32);
+        let mut cfg = cfg();
+        cfg.idle_timeout = idle_timeout;
         let core = Core::new(
-            cfg(),
+            cfg,
             Totals::default(),
             Arc::new(Metrics::new()),
             events,
@@ -1171,13 +1392,43 @@ mod tests {
 
     struct FakeConn {
         script: VecDeque<Vec<u8>>,
+        /// Repeat the last packet instead of dying at script end: the
+        /// idle-timeout tests need a belt that stays stopped while the
+        /// timer runs out.
+        loop_last: bool,
+        last: Option<Vec<u8>>,
         pub written: Vec<Vec<u8>>,
+    }
+
+    impl FakeConn {
+        fn new(script: VecDeque<Vec<u8>>, loop_last: bool) -> Self {
+            Self {
+                script,
+                loop_last,
+                last: None,
+                written: vec![],
+            }
+        }
+
+        /// The Link/Conn wrapper has one; the bare test double no-ops it.
+        async fn disconnect(&mut self) {}
     }
 
     impl crate::link::Notify for FakeConn {
         async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
-            match self.script.pop_front() {
-                Some(v) => Ok(v),
+            // paused-time tests advance through real waits, like the
+            // simulator's 500 ms cycle
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let pkt = match self.script.pop_front() {
+                Some(v) => Some(v),
+                None if self.loop_last => self.last.clone(),
+                None => None,
+            };
+            match pkt {
+                Some(v) => {
+                    self.last = Some(v.clone());
+                    Ok(v)
+                }
                 None => Err(LinkError::Dead("script exhausted".into())),
             }
         }
@@ -1188,15 +1439,133 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------------ §4.5a sleep
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_timeout_puts_the_pump_to_sleep() {
+        let dir = tmpdir("idle");
+        let t = mkcore_with_idle(&dir, 2); // 2 s of stopped = sleep
+        let mut core = t.core;
+        let (_ctrl_tx, mut ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let mut conn = FakeConn::new(VecDeque::new(), true);
+        conn.script
+            .push_back(st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        core.begin_connection(None);
+        let reason = pump(&mut core, &mut conn, &mut ctrl_rx).await;
+        assert_eq!(reason, DeadReason::Idle);
+        conn.disconnect().await;
+        core.enter_sleep();
+        assert_eq!(core.state, State::Sleeping);
+        assert!(!core.snapshot().connected);
+        // entering sleep drops the queued command (§4.5a)
+        core.queue_api(ApiCmd::Start(Some(2.0))).ok();
+        core.enter_sleep();
+        assert!(core.queue.is_empty(), "wake timeout drops the command");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wake_on_start_runs_the_belt() {
+        // full simulated sleep → wake on start → running: the link is
+        // re-established (via SimLink, real notifications) and the queued
+        // start goes out on the first notification cycle
+        let dir = tmpdir("wake");
+        let (events, _ev) = tokio::sync::broadcast::channel(8);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let mut core = Core::new(
+            cfg(),
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        core.cfg.idle_timeout = 2;
+        core.enter_sleep();
+        assert_eq!(core.state, State::Sleeping);
+        let _ = &api_tx; // the daemon would hold this sender
+
+        // the client starts the belt while asleep
+        core.queue_api(ApiCmd::Start(Some(3.0))).ok();
+        assert!(core.take_wake(), "start while sleeping must request a wake");
+
+        // the daemon reconnects and pumps; the scripted connection shows
+        // a running belt so the queued start goes out on the reply cycle
+        core.begin_connection(None);
+        core.arm_late_credit();
+        let mut conn = FakeConn::new(VecDeque::new(), true);
+        conn.script
+            .push_back(st(p::BeltState::Running, 3.0, 0, 0, 0, 0.0));
+        conn.script
+            .push_back(st(p::BeltState::Running, 3.0, 1, 2, 0, 0.5));
+        conn.script
+            .push_back(st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        let (mut ctrl_tx, mut ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let _ = &mut ctrl_tx;
+        let reason = pump(&mut core, &mut conn, &mut ctrl_rx).await;
+        assert_eq!(reason, DeadReason::Idle, "belt stopped again, idles");
+        assert!(
+            conn.written
+                .iter()
+                .any(|p| p.len() == 23 && p[8] == 0x01 && p[12] == 0x04),
+            "the queued start went out: {:?}",
+            conn.written
+        );
+    }
+
+    #[test]
+    fn late_credit_runs_once_and_is_capped() {
+        let dir = tmpdir("credit");
+        let mut t = mkcore_with_idle(&dir, 300);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.arm_late_credit();
+        // the belt was remote-started while asleep: counters already at 50 m
+        c.on_packet(&st(p::BeltState::Running, 2.0, 50, 70, 5, 60.0));
+        assert_eq!(c.snapshot().last_end_reason, None);
+        let ses = c.snapshot().session.expect("session opens with credit");
+        assert_eq!(ses.distance_m, 50, "session seeded with the credit");
+        assert_eq!(c.totals.distance_m, 50, "credited once");
+        // further packets must not double-credit
+        c.on_packet(&st(p::BeltState::Running, 2.0, 60, 80, 6, 65.0));
+        assert_eq!(c.totals.distance_m, 60, "delta accounting continues");
+        // a plain reconnect does NOT credit (continuation baseline §4.4)
+        c.on_disconnect(DeadReason::Link);
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Running, 2.0, 100, 120, 8, 100.0));
+        assert_eq!(c.totals.distance_m, 60, "no double counting");
+        // cap: absurd late-credit values clamp at 20 km / 30 000 steps
+        // (daemon order: enter_sleep → begin_connection → arm)
+        c.on_disconnect(DeadReason::Link); // end the open session first
+        c.enter_sleep();
+        c.begin_connection(None);
+        c.arm_late_credit();
+        c.on_packet(&st(p::BeltState::Running, 2.0, 40_000, 50_000, 9, 200.0));
+        assert_eq!(c.totals.distance_m, 60 + 20_000, "distance capped");
+        assert_eq!(c.totals.steps, 80 + 30_000, "steps capped");
+    }
+
+    #[test]
+    fn sleep_refused_while_moving() {
+        let mut t = mkcore(&tmpdir("sleep409"));
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Running, 2.0, 5, 10, 1, 10.0));
+        assert_eq!(
+            c.queue_api(ApiCmd::Sleep),
+            Err(ApiErr::Disabled),
+            "409 while running"
+        );
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        assert_eq!(c.queue_api(ApiCmd::Sleep), Ok(()));
+        assert!(c.take_sleep());
+    }
+
     #[tokio::test]
     async fn pump_writes_reply_per_notification() {
         let dir = tmpdir("pump");
         let t = mkcore(&dir);
         let (_ctrl_tx, mut ctrl_rx) = mpsc::channel::<Ctrl>(4); // no control traffic
-        let mut conn = FakeConn {
-            script: VecDeque::new(),
-            written: vec![],
-        };
+        let mut conn = FakeConn::new(VecDeque::new(), false);
 
         let mut core = t.core;
         let core = &mut core;

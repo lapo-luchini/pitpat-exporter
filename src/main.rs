@@ -52,6 +52,16 @@ enum Cmd {
         #[command(flatten)]
         client: cli::Client,
     },
+    /// §4.5a: bring the BLE link up without starting the belt.
+    Connect {
+        #[command(flatten)]
+        client: cli::Client,
+    },
+    /// §4.5a: drop the BLE link now (409 while moving).
+    Sleep {
+        #[command(flatten)]
+        client: cli::Client,
+    },
     /// running → pause; otherwise start.
     Toggle {
         #[command(flatten)]
@@ -99,6 +109,8 @@ fn main() -> ExitCode {
         Cmd::Status { client, json } => cli::exit_for(cli::status(&cli::Api::new(&client), json)),
         Cmd::Start { client, speed } => cli::exit_for(cli::start(&cli::Api::new(&client), speed)),
         Cmd::Pause { client } => cli::exit_for(cli::pause(&cli::Api::new(&client))),
+        Cmd::Connect { client } => cli::exit_for(cli::connect(&cli::Api::new(&client))),
+        Cmd::Sleep { client } => cli::exit_for(cli::sleep(&cli::Api::new(&client))),
         Cmd::Toggle { client } => cli::exit_for(cli::toggle(&cli::Api::new(&client))),
         Cmd::Stop { client } => cli::exit_for(cli::stop(&cli::Api::new(&client))),
         Cmd::Speed { client, value } => cli::exit_for(cli::speed(&cli::Api::new(&client), &value)),
@@ -269,9 +281,108 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         cfg.state_dir.clone(),
     );
 
-    // reconnect loop: exponential backoff 1 → 2 → … 30 s, forever (§4.1)
+    // §4.5a: the daemon boots asleep so a reboot doesn't make the
+    // treadmill beep (unless --idle-timeout 0 = always connected)
+    let mut sleeping = core.cfg.idle_timeout > 0;
     let mut backoff_s = 1u64;
+    if sleeping {
+        core.enter_sleep();
+    }
+
     loop {
+        if sleeping {
+            // wait for a wake-capable control call or shutdown; nothing
+            // else runs, no reconnects, no backoff
+            let woke = tokio::select! {
+                c = ctrl_rx.recv() => match c {
+                    Some(core::Ctrl::Shutdown) | None => None,
+                },
+                cmd = core.wait_wake_cmd() => cmd,
+            };
+            let Some(cmd) = woke else {
+                core.on_disconnect(core::DeadReason::Shutdown);
+                break;
+            };
+            core.queue_api(cmd).ok();
+            core.take_sleep(); // sleeping again is a no-op success
+            if !core.take_wake() {
+                continue; // target-only or repeat-sleep: keep sleeping
+            }
+            tracing::info!("waking on control call");
+            // connect within the wake budget, or drop the queued command
+            let deadline =
+                tokio::time::Instant::now() + std::time::Duration::from_secs(core::WAKE_BUDGET_S);
+            let mut woken = false;
+            while tokio::time::Instant::now() < deadline {
+                let attempt = {
+                    let connect = link.connect();
+                    futures::pin_mut!(connect);
+                    tokio::select! {
+                        outcome = &mut connect => Some(outcome),
+                        c = ctrl_rx.recv() => match c {
+                            Some(core::Ctrl::Shutdown) | None => None,
+                        },
+                    }
+                };
+                match attempt {
+                    Some(Ok(conn)) => {
+                        let addr = conn.address();
+                        core.begin_connection(Some(addr.clone()));
+                        // the belt may have been remote-started meanwhile
+                        core.arm_late_credit();
+                        tracing::info!(address = %addr, "woken, link established");
+                        woken = true;
+                        sleeping = false;
+                        let mut conn = conn;
+                        let reason = core::pump(&mut core, &mut conn, &mut ctrl_rx).await;
+                        if reason == core::DeadReason::Shutdown {
+                            shutdown_flow(&mut core, &mut conn).await;
+                            return ExitCode::SUCCESS;
+                        }
+                        if reason == core::DeadReason::Idle {
+                            tracing::info!("idle again, going back to sleep");
+                            conn.disconnect().await;
+                            core.enter_sleep();
+                            sleeping = true;
+                            break;
+                        }
+                        if reason == core::DeadReason::Sleep {
+                            tracing::info!("sleep requested, dropping the link");
+                            conn.disconnect().await;
+                            core.enter_sleep();
+                            sleeping = true;
+                            break;
+                        }
+                        // died mid-walk: fall through to the reconnect
+                        // loop below by exiting the sleeping branch
+                        tracing::warn!(?reason, address = %addr, "link lost after wake");
+                        conn.disconnect().await;
+                        core.on_disconnect(reason);
+                        break;
+                    }
+                    Some(Err(err)) => {
+                        tracing::warn!(?err, "wake connect failed");
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                    None => {
+                        // shutdown while waking
+                        core.drop_queued();
+                        core.on_disconnect(core::DeadReason::Shutdown);
+                        return ExitCode::SUCCESS;
+                    }
+                }
+            }
+            if !woken {
+                // §4.5a: the link didn't come up in time: drop the queued
+                // command and go back to sleep
+                tracing::warn!("wake budget exhausted, dropping queued command");
+                core.drop_queued();
+                core.enter_sleep();
+            }
+            continue;
+        }
+
+        // connected-loop: normal connect + reconnect with backoff (§4.1)
         core.begin_connection(None);
         // a shutdown signal must not wait for the whole scan/connect
         // attempt (REVIEW item 6)
@@ -314,6 +425,22 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         if reason == core::DeadReason::Shutdown {
             shutdown_flow(&mut core, &mut conn).await;
             break;
+        }
+        if reason == core::DeadReason::Idle {
+            // §4.5a: stopped idle for --idle-timeout: sleep on purpose
+            tracing::info!("idle timeout reached, going to sleep");
+            conn.disconnect().await;
+            core.enter_sleep();
+            sleeping = true;
+            continue;
+        }
+        if reason == core::DeadReason::Sleep {
+            // §4.5a: POST /api/sleep while connected and stopped
+            tracing::info!("sleep requested, dropping the link");
+            conn.disconnect().await;
+            core.enter_sleep();
+            sleeping = true;
+            continue;
         }
         tracing::warn!(?reason, address = %conn.address(), "link lost, reconnecting");
         // drop the LE link even when the notify stream died: BlueZ would

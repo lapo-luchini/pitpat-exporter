@@ -53,6 +53,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/api/stop", post(api_stop))
         .route("/api/speed", post(api_speed))
         .route("/api/target", post(api_target).delete(api_target_clear))
+        .route("/api/connect", post(api_connect))
+        .route("/api/sleep", post(api_sleep))
         .layer(DefaultBodyLimit::max(4096))
         .layer(middleware::from_fn_with_state(state.clone(), secure))
         .with_state(state)
@@ -297,17 +299,19 @@ fn snapshot_json(s: &Snapshot) -> serde_json::Value {
 // -------------------------------------------------------------- commands
 
 /// Fast prechecks + enqueue: 409 when disconnected, 503 on a full queue
-/// (the authoritative check runs in the core drain, §6.2).
+/// (the authoritative check runs in the core drain, §6.2). `sleeping`
+/// accepts the wake-capable commands (§4.5a): only a real `disconnected`
+/// link refuses them.
 fn queue(
     state: &AppState,
     cmd: ApiCmd,
-    needs_connection: bool,
+    needs_link: bool,
 ) -> Result<serde_json::Value, (StatusCode, &'static str)> {
-    let (connected, full) = match current(state) {
+    let (state_name, full) = match current(state) {
         None => return Err((StatusCode::SERVICE_UNAVAILABLE, "daemon starting")),
-        Some(s) => (s.connected, s.queue_len >= QUEUE_CAP),
+        Some(s) => (s.state, s.queue_len >= QUEUE_CAP),
     };
-    if needs_connection && !connected {
+    if needs_link && state_name == crate::core::State::Disconnected {
         return Err((StatusCode::CONFLICT, "not connected"));
     }
     if full {
@@ -420,6 +424,16 @@ async fn api_target(AxState(state): AxState<SharedState>, Json(b): Json<TargetBo
         ApiCmd::TargetSet(b.distance_m, b.duration_s),
         false,
     ))
+}
+
+/// §4.5a: wake the daemon without queueing a belt command.
+async fn api_connect(AxState(state): AxState<SharedState>) -> Response {
+    respond(queue(&state, ApiCmd::Connect, false))
+}
+
+/// §4.5a: drop the link now; 409 while the belt is moving.
+async fn api_sleep(AxState(state): AxState<SharedState>) -> Response {
+    respond(queue(&state, ApiCmd::Sleep, false))
 }
 
 async fn api_target_clear(AxState(state): AxState<SharedState>) -> Response {

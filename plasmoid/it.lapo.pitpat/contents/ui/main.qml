@@ -125,7 +125,9 @@ PlasmoidItem {
         // Plasma tooltip (§10): state, speed, session distance, today
         toolTipMainText = next.connected
             ? i18nc("tooltip head", "%1 · %2 km/h", next.state, next.speed_kmh.toFixed(1))
-            : i18n("pitpat daemon not running");
+            : next.state === "sleeping"
+                ? i18nc("tooltip head", "asleep (tap to connect)")
+                : i18n("pitpat daemon not running");
         const ses = next.session
             ? i18nc("tooltip", "session: %1 km", (next.session.distance_m / 1000).toFixed(2))
             : i18nc("tooltip empty", "no open session");

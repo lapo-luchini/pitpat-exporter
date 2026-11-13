@@ -193,6 +193,20 @@ pub fn stop(api: &Api) -> Result<String, CliError> {
         .map(|_| "stopping".into())
 }
 
+/// §4.5a: bring the link up without starting the belt.
+pub fn connect(api: &Api) -> Result<String, CliError> {
+    let agent = new_agent();
+    api.call(&agent, "POST", "/api/connect", empty_body())
+        .map(|_| "connecting".into())
+}
+
+/// §4.5a: drop the link now (409 while moving).
+pub fn sleep(api: &Api) -> Result<String, CliError> {
+    let agent = new_agent();
+    api.call(&agent, "POST", "/api/sleep", empty_body())
+        .map(|_| "sleeping".into())
+}
+
 /// running → pause; otherwise start (KDE shortcut convenience).
 pub fn toggle(api: &Api) -> Result<String, CliError> {
     let agent = new_agent();

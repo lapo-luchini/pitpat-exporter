@@ -17,12 +17,15 @@ Item {
 
     readonly property var snap: root.snap
     readonly property bool working: snap.connected
+    // §4.5a: asleep still accepts start/preset/speed/stop — they wake it
+    readonly property bool asleep: snap.state === "sleeping"
+    readonly property bool reachable: working || asleep
     readonly property bool onMove: snap.state === "running"
         || snap.state === "starting"
         || snap.state === "paused"
     // stopped still allows set-speed: it only updates the remembered
-    // target speed for the next start (§3.6)
-    readonly property bool ctlEnabled: working && !root.busy && snap.state !== "starting"
+    // target speed for the next start (§3.6); asleep wakes (§4.5a)
+    readonly property bool ctlEnabled: reachable && !root.busy && snap.state !== "starting"
 
     property var lastSessions: []
 
@@ -67,6 +70,7 @@ Item {
                 ? i18nc("chip", "%1 · %2 km",
                         full.snap.state,
                         (full.snap.session ? full.snap.session.distance_m / 1000 : 0).toFixed(2))
+                : full.asleep ? i18nc("chip", "asleep")
                 : (full.working ? full.snap.state : i18n("pitpat daemon not running"))
             horizontalAlignment: Text.AlignHCenter
             Layout.fillWidth: true
@@ -141,8 +145,16 @@ Item {
             PlasmaComponents3.Button {
                 display: PlasmaComponents3.AbstractButton.IconOnly
                 icon.name: full.snap.state === "running" ? "media-playback-pause" : "media-playback-start"
-                enabled: full.working && !root.busy && full.snap.state !== "starting"
+                enabled: full.reachable && !root.busy && full.snap.state !== "starting"
                 onClicked: root.toggleStartPause()
+            }
+            PlasmaComponents3.Button {
+                // §4.5a: waking without starting the belt
+                visible: full.asleep
+                text: i18n("Connect")
+                icon.name: "network-connect"
+                enabled: !root.busy
+                onClicked: root.api("POST", "/api/connect", {})
             }
             PlasmaComponents3.ToolButton {
                 text: "−0.1"
@@ -194,7 +206,7 @@ Item {
 
         // stop: visually distinct, always reachable while working (§9)
         PlasmaComponents3.Button {
-            enabled: full.working && !root.busy && full.snap.state !== "stopped"
+            enabled: full.reachable && !root.busy && full.snap.state !== "stopped"
             text: i18n("Stop")
             icon.name: "media-playback-stop"
             Layout.fillWidth: true

@@ -4,7 +4,8 @@ use crate::link::LinkError;
 use crate::protocol::{BeltState, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 /// Simulated treadmill (§4.7): emits a real 31-byte notification every
 /// 500 ms (so the decoder path is exercised), reacts to commands like a
@@ -92,7 +93,8 @@ impl SimBelt {
             Command::Start => {
                 self.target = self.commanded_speed;
                 if self.state != BeltState::Running && self.state != BeltState::Starting {
-                    self.starting_ends_at = Some(Instant::now() + Duration::from_secs(3));
+                    self.starting_ends_at =
+                        Some(tokio::time::Instant::now() + Duration::from_secs(3));
                     self.state = BeltState::Starting;
                     self.speed = 0.0;
                 }
@@ -127,7 +129,11 @@ impl SimBelt {
         let dt_s = dt.as_secs_f64();
 
         match self.state {
-            BeltState::Starting if self.starting_ends_at.is_some_and(|t| Instant::now() >= t) => {
+            BeltState::Starting
+                if self
+                    .starting_ends_at
+                    .is_some_and(|t| tokio::time::Instant::now() >= t) =>
+            {
                 self.state = BeltState::Running;
                 self.speed = 0.0;
             }
@@ -228,7 +234,7 @@ mod tests {
 
     /// Queue a start with 3.0 km/h on a raw connection and check that the
     /// belt reaches `running` and the ramp ends at the target speed.
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(start_paused = true)]
     async fn start_rampes_to_target() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -262,7 +268,7 @@ mod tests {
         panic!("speed never settled at target");
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(start_paused = true)]
     async fn stop_res_counters() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -289,7 +295,27 @@ mod tests {
         assert_eq!(st.kcal, 0);
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    /// Counters must not burst: per-notification distance stays under
+    /// 1 m at low speed (the old std::time tick bug redeemed lost time
+    /// in one packet).
+    #[tokio::test(start_paused = true)]
+    async fn distance_grows_linearly() {
+        let link = SimLink::new(80);
+        let mut c = link.connect().await.unwrap();
+        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
+            .await
+            .unwrap();
+        let mut prev = 0u32;
+        for _ in 0..10 {
+            let pkt = c.recv_notification().await.unwrap();
+            let st = crate::protocol::decode_status(&pkt).unwrap();
+            let d = st.distance_m.saturating_sub(prev);
+            prev = st.distance_m;
+            assert!(d <= 1, "distance burst: +{d} m in one packet");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn drop_flag_turns_notifications() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -304,31 +330,5 @@ mod tests {
                 .unwrap(),
             Err(LinkError::Dead(_))
         ));
-    }
-}
-
-#[cfg(test)]
-mod dbg {
-    use super::*;
-    #[tokio::test(flavor = "current_thread")]
-    async fn distance_grows_linearly() {
-        let link = SimLink::new(80);
-        let mut c = link.connect().await.unwrap();
-        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
-            .await
-            .unwrap();
-        let mut prev = 0u32;
-        for i in 0..8 {
-            let pkt = c.recv_notification().await.unwrap();
-            let st = crate::protocol::decode_status(&pkt).unwrap();
-            let d = st.distance_m.saturating_sub(prev);
-            prev = st.distance_m;
-            eprintln!(
-                "pkt {i}: dist={} delta={d} state={:?}",
-                st.distance_m,
-                st.belt_state()
-            );
-        }
-        assert!(prev <= 5, "delta too big: {prev}");
     }
 }

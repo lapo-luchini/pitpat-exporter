@@ -40,11 +40,10 @@ impl BleLink {
         tracing::info!(adapter = adapter_name, "connecting over BlueZ");
 
         let device = match &self.address {
-            Some(addr) => find_pinned(&adapter, addr).await?,
-            None => find_scanning(&adapter).await?,
+            Some(addr) => connect_pinned(&adapter, addr).await?,
+            None => scan_and_connect(&adapter).await?,
         };
         let dev_addr = device.address().to_string();
-        connect_with_retries(&device).await.map_err(perr)?;
         tracing::info!(device = %dev_addr, "BLE connected");
         let chars = find_characteristics(&device).await?;
         let notify = chars.notify.notify().await.map_err(perr)?;
@@ -88,8 +87,50 @@ async fn find_adapter(session: &Session, sel: &str) -> Result<Adapter, LinkError
     )))
 }
 
-/// Pinned address: discover until BlueZ reports the exact device.
-async fn find_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkError> {
+/// Max LE discovery window per attempt (REVIEW round-5 C1): some USB
+/// dongles reset when scans overlap, so scanning must be short and
+/// never back-to-back (the daemon backs off from the attempt's end).
+const DISCOVERY_S: u64 = 10;
+
+/// Start (or join) an LE discovery and yield adapter events. An
+/// "Operation already in progress" from StartDiscovery is harmless:
+/// someone else (bluetoothctl, the desktop) is scanning, so just watch.
+async fn discovery_events(
+    adapter: &Adapter,
+) -> Result<Pin<Box<dyn Stream<Item = AdapterEvent> + Send>>, LinkError> {
+    match adapter.discover_devices().await {
+        Ok(stream) => Ok(Box::pin(stream)),
+        Err(err) if err.kind == bluer::ErrorKind::InProgress => {
+            tracing::info!("discovery already running elsewhere; watching for events");
+            let events = adapter.events().await.map_err(perr)?;
+            Ok(Box::pin(events))
+        }
+        Err(err) => Err(perr(err)),
+    }
+}
+
+/// Pinned address: connect WITHOUT scanning when BlueZ already knows the
+/// device (a plain connect makes BlueZ do the LE connection itself);
+/// fall back to a short discovery only when it doesn't work.
+async fn connect_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkError> {
+    let address: Address = addr
+        .parse()
+        .map_err(|_| LinkError::Dead("bad --address".into()))?;
+    if let Ok(dev) = adapter.device(address) {
+        match connect_with_retries(&dev).await {
+            Ok(()) => return Ok(dev),
+            Err(err) => {
+                tracing::info!(error = %err, "direct connect failed; discovering");
+            }
+        }
+    }
+    let dev = discover_pinned(adapter, addr).await?;
+    connect_with_retries(&dev).await.map_err(perr)?;
+    Ok(dev)
+}
+
+/// Discovery fallback for a pinned address, capped at DISCOVERY_S.
+async fn discover_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkError> {
     let address: Address = addr
         .parse()
         .map_err(|_| LinkError::Dead("bad --address".into()))?;
@@ -99,44 +140,47 @@ async fn find_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkError>
         ..Default::default()
     };
     adapter.set_discovery_filter(filter).await.map_err(perr)?;
-    let events = adapter.discover_devices().await.map_err(perr)?;
+    let events = discovery_events(adapter).await?;
     pin_mut!(events);
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(DISCOVERY_S);
+    let result = loop {
         let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), events.next()).await
         else {
-            if std::time::Instant::now() > deadline {
-                tracing::warn!(addr, "treadmill not discovered within 30 s");
-                return Err(LinkError::NotFound);
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!(addr, secs = DISCOVERY_S, "treadmill not discovered in time");
+                break Err(LinkError::NotFound);
             }
             continue;
         };
         if let AdapterEvent::DeviceAdded(a) = event {
             if a == address {
-                return adapter.device(a).map_err(|_| LinkError::NotFound);
+                break adapter.device(a).map_err(|_| LinkError::NotFound);
             }
         }
-    }
+    };
+    // explicit scope end: dropping the pinned stream ends our discovery
+    // session before the caller starts its backoff sleep (C1)
+    result
 }
 
-/// Auto-discovery: scan with the fba0 service UUID filtered advertisement
-/// and take the first match (§4.1).
-async fn find_scanning(adapter: &Adapter) -> Result<Device, LinkError> {
+/// Auto-discovery: scan with the fba0 service UUID filter and take the
+/// first match; same 10 s cap and explicit stop as the pinned fallback.
+async fn scan_and_connect(adapter: &Adapter) -> Result<Device, LinkError> {
     let filter = DiscoveryFilter {
         transport: DiscoveryTransport::Le,
         uuids: HashSet::from([SERVICE_UUID]),
         ..Default::default()
     };
     adapter.set_discovery_filter(filter).await.map_err(perr)?;
-    let events = adapter.discover_devices().await.map_err(perr)?;
+    let events = discovery_events(adapter).await?;
     pin_mut!(events);
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    loop {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(DISCOVERY_S);
+    let result = loop {
         let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), events.next()).await
         else {
-            if std::time::Instant::now() > deadline {
-                tracing::warn!("no PitPat advertisement seen within 30 s");
-                return Err(LinkError::NotFound);
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!(secs = DISCOVERY_S, "no PitPat advertisement seen in time");
+                break Err(LinkError::NotFound);
             }
             continue;
         };
@@ -146,10 +190,13 @@ async fn find_scanning(adapter: &Adapter) -> Result<Device, LinkError> {
             };
             let uuids = dev.uuids().await.unwrap_or_default().unwrap_or_default();
             if uuids.contains(&SERVICE_UUID) {
-                return Ok(dev);
+                break Ok(dev);
             }
         }
-    }
+    };
+    let dev = result?;
+    connect_with_retries(&dev).await.map_err(perr)?;
+    Ok(dev)
 }
 
 async fn connect_with_retries(device: &Device) -> bluer::Result<()> {

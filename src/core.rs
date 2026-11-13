@@ -432,9 +432,16 @@ impl Core {
         self.metrics.last_notification.set(unix_now());
         let Some(st) = p::decode_status(raw) else {
             self.metrics.invalid_packets_total.inc_by(1);
-            tracing::debug!(pkt_len = raw.len(), "undecodable status notification");
+            tracing::debug!(bytes = %hex(raw), "undecodable status notification");
             return;
         };
+        // §12: every packet in hex, both directions
+        tracing::debug!(
+            bytes = %hex(raw),
+            state = ?st.belt_state(),
+            speed_kmh = self.speed_kmh,
+            "status notification"
+        );
 
         self.imperial = st.imperial();
         self.speed_kmh = st.speed_mps * 3.6;
@@ -677,6 +684,17 @@ impl Core {
 
 // --------------------------------------------------------------- helpers
 
+/// §12: hex trace of a packet, space-separated.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::new(), |acc, b| {
+        if acc.is_empty() {
+            format!("{b:02x}")
+        } else {
+            acc + &format!(" {b:02x}")
+        }
+    })
+}
+
 fn eq_speed(a: f64, b: f64) -> bool {
     a.is_finite() && b.is_finite() && (a - b).abs() < 1e-9
 }
@@ -697,6 +715,8 @@ fn unix_now() -> f64 {
 /// with the same-packet retry rule on write errors (§3.5).
 async fn write_reply<C: Notify>(core: &mut Core, conn: &mut C) {
     let pkt = core.next_reply();
+    // §12: every packet in hex, both directions
+    tracing::debug!(bytes = %hex(&pkt), "write");
     if conn.write_packet(&pkt).await.is_ok() {
         core.write_succeeded();
         return;

@@ -24,6 +24,8 @@ pub struct SimLink {
 }
 
 pub struct SimConn {
+    /// The simulated treadmill's fixed address (§6.2 device view).
+    pub address: String,
     belt: Arc<std::sync::Mutex<SimBelt>>,
     weight_kg: u8,
     drop: Arc<AtomicBool>,
@@ -90,6 +92,7 @@ impl SimLink {
         // a fresh connection revives the link (SIGUSR1 was just a probe)
         self.drop.store(false, Ordering::Relaxed);
         Ok(SimConn {
+            address: "00:11:22:33:44:55".to_string(),
             belt: self.belt.clone(),
             weight_kg: self.weight_kg,
             drop: self.drop.clone(),
@@ -224,6 +227,10 @@ fn parse_command(pkt: &[u8]) -> Option<(Command, f64)> {
 pub const NOTIFY_PERIOD: Duration = Duration::from_millis(500);
 
 impl SimConn {
+    /// Drop the link explicitly: the simulator has no LE link, but the
+    /// flag is armed again so a reconnect starts fresh.
+    pub async fn disconnect(&mut self) {}
+
     pub async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
         tokio::time::sleep(NOTIFY_PERIOD).await;
         if self.drop.load(Ordering::Relaxed) {

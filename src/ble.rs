@@ -45,7 +45,7 @@ impl BleLink {
         }
     }
 
-    pub async fn connect(&mut self) -> Result<crate::link::Conn, LinkError> {
+    pub async fn connect(&mut self) -> Result<BleConn, LinkError> {
         let session = Session::new().await.map_err(perr)?;
         let adapter = match &self.adapter_name {
             Some(sel) => find_adapter(&session, sel).await?,
@@ -72,12 +72,12 @@ impl BleLink {
         let chars = find_characteristics(&device).await?;
         let notify = chars.notify.notify().await.map_err(perr)?;
         tracing::debug!("notifications subscribed");
-        Ok(crate::link::Conn::Ble(BleConn {
+        Ok(BleConn {
             address: dev_addr,
             device,
             write_char: chars.write,
             notify: Box::pin(notify),
-        }))
+        })
     }
 }
 

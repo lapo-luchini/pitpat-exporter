@@ -6,6 +6,7 @@ use crate::link::Notify;
 use crate::metrics::Metrics;
 use crate::protocol as p;
 use crate::session::{DeltaTracker, EndReason, Totals};
+use futures::pin_mut;
 use jiff::Timestamp;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -369,19 +370,21 @@ impl Core {
                 };
                 Ok(())
             }
-            _ if self.state == State::Disconnected => Err(ApiErr::Disabled),
             ApiCmd::Connect => {
                 // waking with no belt command: the daemon sees the request
                 self.wake_requested = true;
                 Ok(())
             }
             ApiCmd::Sleep => {
+                // §4.5a (amended): also while disconnected, where it ends
+                // a mid-walk reconnect loop (REVIEW round-6 D2)
                 if self.moving() {
                     return Err(ApiErr::Disabled);
                 }
                 self.sleep_requested = true;
                 Ok(())
             }
+            _ if self.state == State::Disconnected => Err(ApiErr::Disabled),
             ApiCmd::Start(s) => {
                 if self.state == State::Sleeping {
                     self.wake_requested = true;
@@ -418,9 +421,8 @@ impl Core {
                 Ok(())
             }
             ApiCmd::SpeedAbs(v) => {
-                if self.state == State::Sleeping {
-                    self.wake_requested = true;
-                }
+                // §4.5a (amended): a speed change while sleeping only
+                // updates the remembered target — no wake, no beep
                 self.idle_since = Some(tokio::time::Instant::now());
                 let v = self.clamp(v);
                 self.target_speed_kmh = v;
@@ -431,9 +433,7 @@ impl Core {
                 Ok(())
             }
             ApiCmd::SpeedDelta(d) => {
-                if self.state == State::Sleeping {
-                    self.wake_requested = true;
-                }
+                // §4.5a (amended): no wake, like SpeedAbs
                 self.idle_since = Some(tokio::time::Instant::now());
                 let v = self.clamp(self.target_speed_kmh + d);
                 self.target_speed_kmh = v;
@@ -979,6 +979,282 @@ pub async fn pump<C: Notify>(
     }
 }
 
+/// SIGTERM/SIGINT (§4.6): if the belt is moving, send stop and wait up
+/// to 3 s for the treadmill to confirm via the notification cycle, then
+/// close the session (end_reason shutdown), persist totals, drop the
+/// LE link explicitly. Used by the supervisor before returning.
+pub async fn shutdown_flow<C: Notify>(core: &mut Core, conn: &mut C) {
+    if core.moving() {
+        tracing::info!("stopping the belt before exit");
+        core.begin_shutdown();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while core.state != State::Stopped {
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!("belt not confirmed stopped within 3 s, exiting anyway");
+                break;
+            }
+            if let Ok(Ok(raw)) =
+                tokio::time::timeout(Duration::from_millis(500), conn.recv_notification()).await
+            {
+                core.on_packet(&raw);
+                core.drain_api_cmds();
+                write_reply(core, conn).await;
+            }
+        }
+    }
+    core.on_disconnect(DeadReason::Shutdown);
+    core.persist();
+    // BlueZ keeps the LE link up after the notify stream dies unless the
+    // Device.Disconnect goes out explicitly: the phone app would stay
+    // locked out (REVIEW round-2 A4)
+    conn.disconnect().await;
+}
+
+/// §4.5a + §4.1: the whole daemon link policy, factored out of main so
+/// it can be tested (REVIEW round-6 D3):
+/// - boot asleep (unless idle_timeout = 0), wake on control calls with a
+///   30 s budget (queued command dropped on timeout),
+/// - idle timeout → disconnect + sleep,
+/// - link lost while stopped → sleep immediately; lost mid-walk →
+///   reconnect with backoff but give up after idle_timeout without a
+///   link (close the session as disconnected, then sleep); /api/sleep
+///   ends such a reconnect loop; idle_timeout = 0 reconnects forever.
+pub async fn supervise<L>(core: &mut Core, link: &mut L, ctrl: &mut mpsc::Receiver<Ctrl>)
+where
+    L: crate::link::LinkT,
+    L::Conn: Notify,
+{
+    let mut sleeping = core.cfg.idle_timeout > 0;
+    let mut backoff_s: u64 = 1;
+    if sleeping {
+        core.enter_sleep();
+    }
+    'outer: loop {
+        // ---------------------------------------------- obtain a link
+        let mut conn = if sleeping {
+            // §4.5a: wait for a wake-capable control call or shutdown;
+            // nothing else runs: no reconnects, no backoff, no watchdog
+            let woke = tokio::select! {
+                c = ctrl.recv() => match c {
+                    Some(Ctrl::Shutdown) | None => None,
+                },
+                cmd = core.wait_wake_cmd() => cmd,
+            };
+            let Some(cmd) = woke else {
+                core.on_disconnect(DeadReason::Shutdown);
+                return;
+            };
+            core.queue_api(cmd).ok();
+            core.take_sleep(); // sleeping again is a no-op success
+            if !core.take_wake() {
+                // target-only or repeat-sleep: keep sleeping
+                continue 'outer;
+            }
+            tracing::info!("waking on control call");
+            // §4.5a: connect within the wake budget; the budget applies
+            // to each attempt too (timeout_at), not just the loop
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(WAKE_BUDGET_S);
+            let mut woken_conn: Option<L::Conn> = None;
+            while tokio::time::Instant::now() < deadline {
+                let attempt = {
+                    let connect = link.connect();
+                    pin_mut!(connect);
+                    tokio::select! {
+                        outcome = tokio::time::timeout_at(deadline, &mut connect) => outcome.ok(),
+                        c = ctrl.recv() => match c {
+                            Some(Ctrl::Shutdown) | None => None,
+                        },
+                    }
+                };
+                match attempt {
+                    Some(Ok(conn)) => {
+                        let addr = conn.address();
+                        core.begin_connection(Some(addr.clone()));
+                        // the belt may have been remote-started meanwhile
+                        core.arm_late_credit();
+                        tracing::info!(address = %addr, "woken, link established");
+                        woken_conn = Some(conn);
+                        break;
+                    }
+                    Some(Err(err)) => {
+                        tracing::warn!(?err, "wake connect failed");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                    None => {
+                        // shutdown while waking
+                        core.drop_queued();
+                        core.on_disconnect(DeadReason::Shutdown);
+                        return;
+                    }
+                }
+            }
+            match woken_conn {
+                Some(conn) => conn,
+                None => {
+                    // §4.5a: the link didn't come up in time: drop the
+                    // queued command and go back to sleep
+                    tracing::warn!("wake budget exhausted, dropping queued command");
+                    core.drop_queued();
+                    core.enter_sleep();
+                    continue 'outer;
+                }
+            }
+        } else {
+            // §4.1 connect (raced with shutdown so a SIGTERM doesn't wait
+            // for a whole scan)
+            let attempt = {
+                let connect = link.connect();
+                pin_mut!(connect);
+                tokio::select! {
+                    outcome = &mut connect => Some(outcome),
+                    c = ctrl.recv() => match c {
+                        Some(Ctrl::Shutdown) | None => None,
+                    },
+                }
+            };
+            match attempt {
+                Some(Ok(conn)) => {
+                    let addr = conn.address();
+                    core.begin_connection(Some(addr.clone()));
+                    tracing::info!(address = %addr, "link established");
+                    backoff_s = 1;
+                    conn
+                }
+                Some(Err(err)) => {
+                    tracing::warn!(?err, "connection failed");
+                    core.on_disconnect(DeadReason::Link);
+                    core.metrics.reconnects_total.inc();
+                    if backoff_wait(core, &mut backoff_s, ctrl).await {
+                        core.on_disconnect(DeadReason::Shutdown);
+                        return;
+                    }
+                    continue 'outer;
+                }
+                None => {
+                    core.on_disconnect(DeadReason::Shutdown);
+                    return;
+                }
+            }
+        };
+        // ------------------------------------------------------ run
+        loop {
+            let reason = pump(core, &mut conn, ctrl).await;
+            match reason {
+                DeadReason::Shutdown => {
+                    shutdown_flow(core, &mut conn).await;
+                    return;
+                }
+                DeadReason::Idle | DeadReason::Sleep => {
+                    conn.disconnect().await;
+                    core.enter_sleep();
+                    sleeping = true;
+                    continue 'outer;
+                }
+                DeadReason::Link | DeadReason::Watchdog => {
+                    tracing::warn!(?reason, address = %conn.address(), "link lost");
+                    // drop the LE link even when the notify stream died:
+                    // BlueZ would keep the treadmill locked against its
+                    // phone app otherwise (REVIEW round-2 A4)
+                    conn.disconnect().await;
+                    if core.state == State::Stopped && core.session.is_none() {
+                        // §4.5a (amended): the treadmill was most likely
+                        // switched off: reconnecting forever keeps the
+                        // radio busy — sleep straight away
+                        core.enter_sleep();
+                        sleeping = true;
+                        continue 'outer;
+                    }
+                    if core.cfg.idle_timeout == 0 {
+                        // §4.1: the old reconnect-forever behaviour
+                        core.on_disconnect(reason);
+                        core.metrics.reconnects_total.inc();
+                        if backoff_wait(core, &mut backoff_s, ctrl).await {
+                            core.on_disconnect(DeadReason::Shutdown);
+                            return;
+                        }
+                        continue 'outer;
+                    }
+                    // §4.5a (amended): lost mid-walk: reconnect with
+                    // backoff, but give up after idle_timeout without a
+                    // link, close the session as disconnected and sleep.
+                    // The wait also serves queued client commands so a
+                    // POST /api/sleep can end it.
+                    let budget =
+                        tokio::time::Instant::now() + Duration::from_secs(core.cfg.idle_timeout);
+                    let mut regained = false;
+                    while tokio::time::Instant::now() < budget {
+                        let wait = budget
+                            .saturating_duration_since(tokio::time::Instant::now())
+                            .min(Duration::from_secs(backoff_s));
+                        let attempt = {
+                            let connect = link.connect();
+                            pin_mut!(connect);
+                            tokio::select! {
+                                outcome = tokio::time::timeout(wait, &mut connect) => outcome.ok(),
+                                c = ctrl.recv() => match c {
+                                    Some(Ctrl::Shutdown) | None => {
+                                        core.on_disconnect(DeadReason::Shutdown);
+                                        return;
+                                    }
+                                },
+                                cmd = core.wait_wake_cmd() => match cmd {
+                                    Some(cmd) => {
+                                        core.queue_api(cmd).ok();
+                                        if core.take_sleep() {
+                                            break; // ends the reconnect loop
+                                        }
+                                        None
+                                    }
+                                    None => {
+                                        core.on_disconnect(DeadReason::Shutdown);
+                                        return;
+                                    }
+                                },
+                            }
+                        };
+                        match attempt {
+                            Some(Ok(new)) => {
+                                let addr = new.address();
+                                core.begin_connection(Some(addr.clone()));
+                                tracing::info!(address = %addr, "link regained");
+                                conn = new;
+                                regained = true;
+                                break;
+                            }
+                            Some(Err(err)) => {
+                                tracing::debug!(?err, "reconnect attempt failed");
+                            }
+                            None => {} // backoff tick
+                        }
+                        backoff_s = (backoff_s * 2).min(30);
+                    }
+                    if regained {
+                        continue; // resume pumping the same session
+                    }
+                    core.on_disconnect(DeadReason::Link);
+                    core.metrics.reconnects_total.inc();
+                    core.enter_sleep();
+                    sleeping = true;
+                    continue 'outer;
+                }
+            }
+        }
+    }
+}
+
+/// Backoff sleep raced against shutdown; true when shutdown arrived.
+async fn backoff_wait(core: &Core, backoff_s: &mut u64, ctrl: &mut mpsc::Receiver<Ctrl>) -> bool {
+    let _ = core;
+    match tokio::time::timeout(Duration::from_secs(*backoff_s), ctrl.recv()).await {
+        Ok(Some(Ctrl::Shutdown)) | Ok(None) => true,
+        _ => {
+            *backoff_s = (*backoff_s * 2).min(30);
+            false
+        }
+    }
+}
+
+// placeholder so the string replace above has an anchor
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1404,12 +1680,15 @@ mod tests {
                 written: vec![],
             }
         }
-
-        /// The Link/Conn wrapper has one; the bare test double no-ops it.
-        async fn disconnect(&mut self) {}
     }
 
     impl crate::link::Notify for FakeConn {
+        fn address(&self) -> String {
+            "00:11:22:33:44:55".to_string()
+        }
+
+        async fn disconnect(&mut self) {}
+
         async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
             // paused-time tests advance through real waits, like the
             // simulator's 500 ms cycle

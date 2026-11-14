@@ -133,14 +133,19 @@ async fn discovery_events(
     }
 }
 
-/// Pinned address (REVIEW round-6 D1): never scan in the normal path.
+/// Pinned address (REVIEW rounds 6-7, D1/E3): never scan except when
+/// BlueZ lacks ConnectDevice.
 /// 1. BlueZ knows the device → plain connect (BlueZ does the LE
-///    connection itself).
-/// 2. BlueZ forgot it (normal after a 5-min sleep): ConnectDevice, which
-///    connects without a scan but needs BlueZ's experimental flag; try
-///    LePublic then LeRandom, and cache the type that worked in the
-///    state dir for later attempts.
-/// 3. Only when that is unsupported does a short discovery run.
+///    connection itself). Skip ConnectDevice afterwards: it could only
+///    return AlreadyExists.
+/// 2. BlueZ forgot the device (normal after a 5-min sleep): ConnectDevice
+///    connects without a scan but needs BlueZ's experimental flag. With
+///    a cached address type only that type is tried (each failed type
+///    costs a BlueZ connect timeout); otherwise LePublic then LeRandom.
+///    Any other failure returns the error — the supervisor's budget and
+///    backoff handle the retries; scanning must not happen (the user's
+///    RTL8761BU resets under overlapping scans). Only when ConnectDevice
+///    is unsupported does a short discovery run.
 async fn connect_pinned(
     adapter: &Adapter,
     addr: &str,
@@ -156,49 +161,54 @@ async fn connect_pinned(
         match connect_with_retries(&dev).await {
             Ok(()) => return Ok(dev),
             Err(err) => {
-                tracing::info!(error = %err, "direct connect failed");
+                // step 2 can only fail with AlreadyExists now
+                tracing::info!(error = %err, "direct connect failed; using ConnectDevice");
             }
         }
     }
 
     // 2. ConnectDevice without a scan (experimental BlueZ feature)
-    if *connect_device_ok {
-        let mut last_err = None;
-        for ty in cached_type(state_dir, addr)
-            .into_iter()
-            .chain([AddressType::LePublic, AddressType::LeRandom])
-        {
-            match adapter.connect_device(address, ty).await {
-                Ok(dev) => {
-                    save_type(state_dir, addr, ty);
-                    tracing::info!(?ty, "connected via ConnectDevice without scanning");
-                    return Ok(dev);
-                }
-                Err(err) => {
-                    tracing::debug!(?ty, error = %err, "ConnectDevice failed");
-                    last_err = Some(err);
-                }
+    if !*connect_device_ok {
+        return Err(LinkError::NotFound);
+    }
+    let mut last_err = None;
+    let cached = cached_type(state_dir, addr);
+    let types: Vec<AddressType> = match cached {
+        Some(ty) => vec![ty], // one failed type costs a BlueZ connect timeout
+        None => vec![AddressType::LePublic, AddressType::LeRandom],
+    };
+    for ty in types {
+        match adapter.connect_device(address, ty).await {
+            Ok(dev) => {
+                save_type(state_dir, addr, ty);
+                tracing::info!(?ty, "connected via ConnectDevice without scanning");
+                return Ok(dev);
+            }
+            Err(err) => {
+                tracing::debug!(?ty, error = %err, "ConnectDevice failed");
+                last_err = Some(err);
             }
         }
-        let err = last_err.expect("at least one address type tried");
-        if err.kind == bluer::ErrorKind::NotSupported
-            || err.kind == bluer::ErrorKind::NotAvailable
-            || err.message.contains("ConnectDevice")
-        {
-            *connect_device_ok = false;
-            tracing::warn!(
-                "BlueZ lacks ConnectDevice (needs hardware.bluetooth.settings.                 General.Experimental = true): every wake will run a short scan"
-            );
-        } else {
-            // the treadmill may be off; a short discovery is the last resort
-            tracing::info!(error = %err, "ConnectDevice failed; discovering");
-        }
     }
-
-    // 3. discovery fallback (short, capped)
-    let dev = discover_pinned(adapter, addr).await?;
-    connect_with_retries(&dev).await.map_err(perr)?;
-    Ok(dev)
+    let err = last_err.expect("at least one address type tried");
+    if err.kind == bluer::ErrorKind::NotSupported
+        || err.kind == bluer::ErrorKind::NotAvailable
+        || err.message.contains("ConnectDevice")
+    {
+        *connect_device_ok = false;
+        tracing::warn!(
+            "BlueZ lacks ConnectDevice (needs hardware.bluetooth.settings.\
+                 General.Experimental = true): every wake will run a short scan"
+        );
+        // 3. discovery fallback, only for an unsupported BlueZ (short,
+        // capped)
+        let dev = discover_pinned(adapter, addr).await?;
+        connect_with_retries(&dev).await.map_err(perr)?;
+        return Ok(dev);
+    }
+    // the treadmill is likely off or out of reach: return the error and
+    // let the supervisor's budget/backoff retry (E3)
+    Err(perr(err))
 }
 
 /// Cached LE address type for a pinned address, from the state dir.

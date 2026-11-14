@@ -1133,11 +1133,18 @@ where
                     tracing::warn!(?err, "connection failed");
                     core.on_disconnect(DeadReason::Link);
                     core.metrics.reconnects_total.inc();
-                    if backoff_wait(&mut backoff_s, &mut ctrl).await {
-                        core.on_disconnect(DeadReason::Shutdown);
-                        return;
+                    match backoff_wait(&mut core, &mut backoff_s, &mut ctrl).await {
+                        BackoffOutcome::Shutdown => {
+                            core.on_disconnect(DeadReason::Shutdown);
+                            return;
+                        }
+                        BackoffOutcome::Sleep => {
+                            core.enter_sleep();
+                            sleeping = true;
+                            continue 'outer;
+                        }
+                        BackoffOutcome::Tick => continue 'outer,
                     }
-                    continue 'outer;
                 }
                 None => {
                     core.on_disconnect(DeadReason::Shutdown);
@@ -1178,17 +1185,35 @@ where
                         // §4.1: the old reconnect-forever behaviour
                         core.on_disconnect(reason);
                         core.metrics.reconnects_total.inc();
-                        if backoff_wait(&mut backoff_s, &mut ctrl).await {
-                            core.on_disconnect(DeadReason::Shutdown);
-                            return;
+                        match backoff_wait(&mut core, &mut backoff_s, &mut ctrl).await {
+                            BackoffOutcome::Shutdown => {
+                                core.on_disconnect(DeadReason::Shutdown);
+                                return;
+                            }
+                            BackoffOutcome::Sleep => {
+                                core.enter_sleep();
+                                sleeping = true;
+                                continue 'outer;
+                            }
+                            BackoffOutcome::Tick => continue 'outer,
                         }
-                        continue 'outer;
                     }
-                    // §4.5a (amended): lost mid-walk: reconnect with
-                    // backoff, but give up after idle_timeout without a
-                    // link, close the session as disconnected and sleep.
-                    // The wait also serves queued client commands so a
-                    // POST /api/sleep can end it.
+                    // §4.5a (amended): lost mid-walk: the loss is handled
+                    // as in §4.1 FIRST — the open session closes as
+                    // `disconnected` right away (state disconnected, speed
+                    // cleared) so the API/metrics don't show a moving,
+                    // connected treadmill with no link, and the walk is
+                    // recorded. The reconnect that follows then opens a
+                    // new session as usual (§4.3). (REVIEW round-7 E1)
+                    core.on_disconnect(reason);
+                    core.metrics.reconnects_total.inc();
+                    // reconnect with backoff, but give up after
+                    // idle_timeout without a link and sleep. The wait also
+                    // serves queued client commands so a POST /api/sleep
+                    // can end it. Each attempt is bounded only by the
+                    // remaining budget — a real BLE connect takes several
+                    // seconds — and a control call does not cancel it
+                    // (REVIEW round-7 E2).
                     let budget =
                         tokio::time::Instant::now() + Duration::from_secs(core.cfg.idle_timeout);
                     let mut regained = false;
@@ -1196,14 +1221,11 @@ where
                         if tokio::time::Instant::now() >= budget {
                             break;
                         }
-                        let wait = budget
-                            .saturating_duration_since(tokio::time::Instant::now())
-                            .min(Duration::from_secs(backoff_s));
                         let attempt = {
                             let connect = link.connect();
                             pin_mut!(connect);
                             tokio::select! {
-                                outcome = tokio::time::timeout(wait, &mut connect) => outcome.ok(),
+                                outcome = tokio::time::timeout_at(budget, &mut connect) => outcome.ok(),
                                 c = ctrl.recv() => match c {
                                     Some(Ctrl::Shutdown) | None => {
                                         core.on_disconnect(DeadReason::Shutdown);
@@ -1235,13 +1257,22 @@ where
                                 break;
                             }
                             Some(Err(_err)) => {
-                                // the backoff must actually elapse: paused
-                                // time only advances through real awaits
-                                tokio::time::sleep(Duration::from_secs(backoff_s)).await;
+                                // failed attempt: sleep the backoff, raced
+                                // against shutdown and the inbox (E2)
+                                match backoff_wait(&mut core, &mut backoff_s, &mut ctrl).await {
+                                    BackoffOutcome::Shutdown => {
+                                        core.on_disconnect(DeadReason::Shutdown);
+                                        return;
+                                    }
+                                    BackoffOutcome::Sleep => break,
+                                    BackoffOutcome::Tick => {}
+                                }
                             }
-                            None => {} // backoff tick
+                            None => {
+                                // budget exhausted
+                                break;
+                            }
                         }
-                        backoff_s = (backoff_s * 2).min(30);
                     }
                     if regained {
                         continue; // resume pumping the same session
@@ -1257,15 +1288,39 @@ where
     }
 }
 
-/// Backoff sleep raced against shutdown; true when shutdown arrived.
-async fn backoff_wait(backoff_s: &mut u64, ctrl: &mut mpsc::Receiver<Ctrl>) -> bool {
-    match tokio::time::timeout(Duration::from_secs(*backoff_s), ctrl.recv()).await {
-        Ok(Some(Ctrl::Shutdown)) | Ok(None) => true,
-        _ => {
-            *backoff_s = (*backoff_s * 2).min(30);
-            false
-        }
-    }
+/// Backoff sleep raced against shutdown AND client commands (E2): a
+/// control call is queued without ending the wait — only /api/sleep or
+/// shutdown end the loop.
+enum BackoffOutcome {
+    Shutdown,
+    Sleep,
+    Tick,
+}
+
+async fn backoff_wait(
+    core: &mut Core,
+    backoff_s: &mut u64,
+    ctrl: &mut mpsc::Receiver<Ctrl>,
+) -> BackoffOutcome {
+    let out = tokio::select! {
+        c = ctrl.recv() => match c {
+            Some(Ctrl::Shutdown) | None => BackoffOutcome::Shutdown,
+        },
+        cmd = core.wait_wake_cmd() => match cmd {
+            Some(cmd) => {
+                core.queue_api(cmd).ok();
+                if core.take_sleep() {
+                    BackoffOutcome::Sleep
+                } else {
+                    BackoffOutcome::Tick
+                }
+            }
+            None => BackoffOutcome::Shutdown,
+        },
+        _ = tokio::time::sleep(Duration::from_secs(*backoff_s)) => BackoffOutcome::Tick,
+    };
+    *backoff_s = (*backoff_s * 2).min(30);
+    out
 }
 
 #[cfg(test)]
@@ -2066,6 +2121,79 @@ mod tests {
             .await;
     }
 
+    /// Link lost mid-walk, then the link comes back: the first walk is
+    /// closed as `disconnected` and recorded, and the regained link opens
+    /// a new session (REVIEW round-7 E1).
+    #[tokio::test(start_paused = true)]
+    async fn supervise_link_lost_midwalk_regain() {
+        let dir = tmpdir("sup7");
+        let dir2 = dir.clone();
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 5,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        // connects alternate: running-then-die, running-and-stays
+        struct RegainLink {
+            connects: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl crate::link::LinkT for RegainLink {
+            type Conn = FakeConn;
+            async fn connect(&mut self) -> Result<FakeConn, LinkError> {
+                let n = self
+                    .connects
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n == 0 {
+                    // run briefly (treadmill reports 10 s of moving), then
+                    // the link dies
+                    Ok(FakeConn::new(
+                        VecDeque::from([st(p::BeltState::Running, 2.0, 0, 0, 0, 10.0)]),
+                        false,
+                    ))
+                } else {
+                    // regained: keeps running long enough to count
+                    Ok(FakeConn::new(
+                        VecDeque::from([st(p::BeltState::Running, 2.0, 0, 0, 0, 0.0)]),
+                        true,
+                    ))
+                }
+            }
+        }
+        let link = RegainLink {
+            connects: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+        let connects = link.connects.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await, "boots asleep");
+                api_tx.send(ApiCmd::Connect).await.unwrap();
+                assert!(wait_state(&mut ev_rx, "running").await);
+                // link dies mid-walk: the first session is recorded as
+                // disconnected BEFORE the regain (E1)
+                assert!(wait_state(&mut ev_rx, "disconnected").await);
+                let rec = &crate::session::read_sessions(&dir2, 4)[0];
+                assert_eq!(rec.end_reason, "disconnected");
+                // the link comes back and a new session opens
+                assert!(wait_state(&mut ev_rx, "running").await);
+                let sessions = crate::session::read_sessions(&dir2, 4);
+                assert!(!sessions.is_empty(), "the first walk was recorded");
+                sup.abort();
+                let _ = connects.load(std::sync::atomic::Ordering::Relaxed);
+            })
+            .await;
+    }
+
     /// Remote start while sleeping (§4.5a): the wake credits the walk once.
     #[tokio::test(start_paused = true)]
     async fn supervise_remote_start_while_sleeping() {
@@ -2301,4 +2429,3 @@ mod tests {
         assert!((second.speed_kmh - 2.0).abs() < 1e-9);
     }
 }
-

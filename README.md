@@ -5,9 +5,8 @@ and export its data as Prometheus metrics — most importantly **the distance wa
 both for the current session and as a lifetime counter.
 
 Protocol reverse-engineering credit: the [PitPat-WebBT](https://github.com/KeiranY/PitPat-WebBT)
-project (`treadmill.js`); everything needed is documented in [`SPEC.md`](SPEC.md) §3. Writes must
-be ATT **Write Requests** (`writeValue` with response) — the treadmill silently ignores Write
-Commands.
+project (`treadmill.js`). Writes must be ATT **Write Requests** (`writeValue` with response) —
+the treadmill silently ignores Write Commands.
 
 ## Components
 
@@ -22,9 +21,10 @@ Commands.
 The treadmill beeps on every BLE connect and keeps its LCD lit, so the daemon does not hold the
 link permanently. After `--idle-timeout` seconds (default 300; `0` = always connected) stopped
 with no control call it disconnects and sleeps: no reconnects, no beeps. Any control call wakes
-it — `pitpat start/pause/stop/toggle`, speed changes, or an explicit `pitpat connect` /
-`POST /api/connect`. `pitpat sleep` / `POST /api/sleep` drops the link early. Speed changes
-while asleep only update the remembered target (a stray mouse-wheel won't beep).
+it — `pitpat start/pause/stop/toggle` or an explicit `pitpat connect` / `POST /api/connect`.
+Speed changes (absolute, delta, preset) while asleep only update the remembered target and do
+not wake it (a stray mouse-wheel won't beep). `pitpat sleep` / `POST /api/sleep` drops the link
+early.
 
 Notes:
 

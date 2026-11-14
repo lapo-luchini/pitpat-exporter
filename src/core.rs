@@ -1102,7 +1102,6 @@ where
                 None => {
                     // §4.5a: the link didn't come up in time: drop the
                     // queued command and go back to sleep
-                    eprintln!("supervise: wake budget exhausted");
                     tracing::warn!("wake budget exhausted, dropping queued command");
                     core.drop_queued();
                     core.enter_sleep();
@@ -1162,11 +1161,6 @@ where
                     continue 'outer;
                 }
                 DeadReason::Link | DeadReason::Watchdog => {
-                    eprintln!(
-                        "supervise: link lost, state={:?} session={:?}",
-                        core.state,
-                        core.session.is_some()
-                    );
                     tracing::warn!(?reason, address = %conn.address(), "link lost");
                     // drop the LE link even when the notify stream died:
                     // BlueZ would keep the treadmill locked against its
@@ -1199,10 +1193,6 @@ where
                         tokio::time::Instant::now() + Duration::from_secs(core.cfg.idle_timeout);
                     let mut regained = false;
                     loop {
-                        eprintln!(
-                            "supervise: budget loop, now={:?} budget={budget:?}",
-                            tokio::time::Instant::now()
-                        );
                         if tokio::time::Instant::now() >= budget {
                             break;
                         }
@@ -1278,7 +1268,6 @@ async fn backoff_wait(backoff_s: &mut u64, ctrl: &mut mpsc::Receiver<Ctrl>) -> b
     }
 }
 
-// placeholder so the string replace above has an anchor
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2313,24 +2302,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod minitest {
-    #[tokio::test(start_paused = true)]
-    async fn localset_paused_timeout() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let j = tokio::task::spawn_local(async {
-                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-                    1
-                });
-                let j2 = tokio::task::spawn_local(async {
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                    2
-                });
-                let (a, b) = futures::join!(async { j.await.ok() }, async { j2.await.ok() });
-                eprintln!("minitest: done a={a:?} b={b:?}");
-            })
-            .await;
-    }
-}

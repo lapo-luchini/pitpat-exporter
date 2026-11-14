@@ -270,7 +270,11 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
 
     let mut link = match sim_flag {
         Some(s) => link::Link::Sim(s),
-        None => link::Link::Ble(ble::BleLink::new(cfg.adapter.clone(), cfg.address.clone())),
+        None => link::Link::Ble(ble::BleLink::new(
+            cfg.adapter.clone(),
+            cfg.address.clone(),
+            Some(cfg.state_dir.clone()),
+        )),
     };
     let mut core = core::Core::new(
         config::DaemonCfg::from(&cfg),

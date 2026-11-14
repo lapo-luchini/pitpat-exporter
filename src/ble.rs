@@ -6,9 +6,13 @@ use crate::link::LinkError;
 use crate::protocol::{NOTIFY_UUID, SERVICE_UUID, WRITE_UUID};
 use bluer::gatt::WriteOp;
 use bluer::gatt::remote::{Characteristic, CharacteristicWriteRequest};
-use bluer::{Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, Session};
+use bluer::{
+    Adapter, AdapterEvent, Address, AddressType, Device, DiscoveryFilter, DiscoveryTransport,
+    Session,
+};
 use futures::{Stream, StreamExt, pin_mut};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -17,18 +21,30 @@ use std::time::Duration;
 pub struct BleLink {
     pub adapter_name: Option<String>,
     pub address: Option<String>,
+    /// §4.5a/D1: directory used to remember the pinned device's LE
+    /// address type (public/random) after the first successful
+    /// ConnectDevice, so later wakes don't have to probe both.
+    pub state_dir: Option<PathBuf>,
+    /// Set once when ConnectDevice is missing from BlueZ (needs
+    /// hardware.bluetooth Experimental), so the wake path warns instead
+    /// of re-scanning silently.
+    connect_device_ok: bool,
 }
 
 impl BleLink {
-    pub fn new(adapter_name: Option<String>, address: Option<String>) -> Self {
+    pub fn new(
+        adapter_name: Option<String>,
+        address: Option<String>,
+        state_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             adapter_name,
             address,
+            state_dir,
+            connect_device_ok: true,
         }
     }
 
-    /// One connection attempt. `NotFound` (retried with backoff) only when
-    /// nothing was ever seen.
     pub async fn connect(&mut self) -> Result<crate::link::Conn, LinkError> {
         let session = Session::new().await.map_err(perr)?;
         let adapter = match &self.adapter_name {
@@ -40,7 +56,15 @@ impl BleLink {
         tracing::info!(adapter = adapter_name, "connecting over BlueZ");
 
         let device = match &self.address {
-            Some(addr) => connect_pinned(&adapter, addr).await?,
+            Some(addr) => {
+                connect_pinned(
+                    &adapter,
+                    addr,
+                    self.state_dir.as_ref(),
+                    &mut self.connect_device_ok,
+                )
+                .await?
+            }
             None => scan_and_connect(&adapter).await?,
         };
         let dev_addr = device.address().to_string();
@@ -109,24 +133,104 @@ async fn discovery_events(
     }
 }
 
-/// Pinned address: connect WITHOUT scanning when BlueZ already knows the
-/// device (a plain connect makes BlueZ do the LE connection itself);
-/// fall back to a short discovery only when it doesn't work.
-async fn connect_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkError> {
+/// Pinned address (REVIEW round-6 D1): never scan in the normal path.
+/// 1. BlueZ knows the device → plain connect (BlueZ does the LE
+///    connection itself).
+/// 2. BlueZ forgot it (normal after a 5-min sleep): ConnectDevice, which
+///    connects without a scan but needs BlueZ's experimental flag; try
+///    LePublic then LeRandom, and cache the type that worked in the
+///    state dir for later attempts.
+/// 3. Only when that is unsupported does a short discovery run.
+async fn connect_pinned(
+    adapter: &Adapter,
+    addr: &str,
+    state_dir: Option<&PathBuf>,
+    connect_device_ok: &mut bool,
+) -> Result<Device, LinkError> {
     let address: Address = addr
         .parse()
         .map_err(|_| LinkError::Dead("bad --address".into()))?;
+
+    // 1. known device: plain connect, no scanning
     if let Ok(dev) = adapter.device(address) {
         match connect_with_retries(&dev).await {
             Ok(()) => return Ok(dev),
             Err(err) => {
-                tracing::info!(error = %err, "direct connect failed; discovering");
+                tracing::info!(error = %err, "direct connect failed");
             }
         }
     }
+
+    // 2. ConnectDevice without a scan (experimental BlueZ feature)
+    if *connect_device_ok {
+        let mut last_err = None;
+        for ty in cached_type(state_dir, addr)
+            .into_iter()
+            .chain([AddressType::LePublic, AddressType::LeRandom])
+        {
+            match adapter.connect_device(address, ty).await {
+                Ok(dev) => {
+                    save_type(state_dir, addr, ty);
+                    tracing::info!(?ty, "connected via ConnectDevice without scanning");
+                    return Ok(dev);
+                }
+                Err(err) => {
+                    tracing::debug!(?ty, error = %err, "ConnectDevice failed");
+                    last_err = Some(err);
+                }
+            }
+        }
+        let err = last_err.expect("at least one address type tried");
+        if err.kind == bluer::ErrorKind::NotSupported
+            || err.kind == bluer::ErrorKind::NotAvailable
+            || err.message.contains("ConnectDevice")
+        {
+            *connect_device_ok = false;
+            tracing::warn!(
+                "BlueZ lacks ConnectDevice (needs hardware.bluetooth.settings.                 General.Experimental = true): every wake will run a short scan"
+            );
+        } else {
+            // the treadmill may be off; a short discovery is the last resort
+            tracing::info!(error = %err, "ConnectDevice failed; discovering");
+        }
+    }
+
+    // 3. discovery fallback (short, capped)
     let dev = discover_pinned(adapter, addr).await?;
     connect_with_retries(&dev).await.map_err(perr)?;
     Ok(dev)
+}
+
+/// Cached LE address type for a pinned address, from the state dir.
+fn cached_type(state_dir: Option<&PathBuf>, addr: &str) -> Option<AddressType> {
+    let dir = state_dir?;
+    let text = std::fs::read_to_string(dir.join("address-type")).ok()?;
+    let (mac, ty) = text.trim().split_once(' ')?;
+    if mac != addr {
+        return None;
+    }
+    Some(match ty {
+        "public" => AddressType::LePublic,
+        "random" => AddressType::LeRandom,
+        _ => return None,
+    })
+}
+
+/// Remember which LE address type connected, for future wake attempts.
+fn save_type(state_dir: Option<&PathBuf>, addr: &str, ty: AddressType) {
+    let Some(dir) = state_dir else { return };
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        tracing::warn!(error = %err, "cannot create the state dir");
+        return;
+    }
+    let ty = match ty {
+        AddressType::LePublic => "public",
+        AddressType::LeRandom => "random",
+        AddressType::BrEdr => return,
+    };
+    if let Err(err) = std::fs::write(dir.join("address-type"), format!("{addr} {ty}\n")) {
+        tracing::warn!(error = %err, "cannot cache the address type");
+    }
 }
 
 /// Discovery fallback for a pinned address, capped at DISCOVERY_S.

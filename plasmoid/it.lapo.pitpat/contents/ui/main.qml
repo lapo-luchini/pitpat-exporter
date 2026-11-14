@@ -131,7 +131,7 @@ PlasmoidItem {
         toolTipMainText = next.connected
             ? i18nc("tooltip head", "%1 · %2 km/h", next.state, next.speed_kmh.toFixed(1))
             : next.state === "sleeping"
-                ? i18nc("tooltip head", "asleep (tap to connect)")
+                ? i18nc("tooltip head", "asleep")
                 : i18n("pitpat daemon not running");
         const ses = next.session
             ? i18nc("tooltip", "session: %1 km", (next.session.distance_m / 1000).toFixed(2))
@@ -139,7 +139,10 @@ PlasmoidItem {
         const today = next.today
             ? i18nc("tooltip", "today: %1 km", (next.today.distance_m / 1000).toFixed(2))
             : "";
-        toolTipSubText = ses + "\n" + today;
+        const wake = next.state === "sleeping"
+            ? i18nc("tooltip", "use Connect in the popup to wake it")
+            : "";
+        toolTipSubText = [ses, today, wake].filter(function (x) { return x; }).join("\n");
     }
 
     // POST/DELETE with the JSON media type the daemon requires (§6.1)

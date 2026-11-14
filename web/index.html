@@ -76,8 +76,8 @@ function snap(s){
   $('time').textContent=ses?fmt(ses.duration_s/60):'–';
   $('steps').textContent=ses?ses.steps:'–';
   $('kcal').textContent=ses?ses.kcal:'–';
-  $('tog').disabled=!c||st==='starting';
-  $('stop').disabled=!c||st==='stopped';
+  $('tog').disabled=st==='disconnected'||st==='starting';
+  $('stop').disabled=st==='disconnected'||st==='stopped';
   const ctl=st==='disconnected'||st==='stopped';
   $('dn').disabled=ctl;$('up').disabled=ctl;$('sl').disabled=ctl;
   $('tog').textContent=st==='running'?'Pause':'Start';

@@ -329,11 +329,11 @@ mod tests {
         assert_eq!(st.kcal, 0);
     }
 
-    /// Counters must not burst: per-notification distance stays under
+    /// §4.5a: remote_start makes the NEXT connection report a moving
+    /// belt with growing counters (the crediting scenario). Counters
+    /// must not burst either: per-notification distance stays under
     /// 1 m at low speed (the old std::time tick bug redeemed lost time
     /// in one packet).
-    /// §4.5a: remote_start makes the NEXT connection report a moving
-    /// belt with growing counters (the crediting scenario).
     #[tokio::test(start_paused = true)]
     async fn remote_start_survives_reconnect() {
         let link = SimLink::new(80);

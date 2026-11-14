@@ -203,9 +203,6 @@ pub struct Core {
     /// describe a belt possibly started with the remote: credit its
     /// counters to the lifetime totals once.
     expect_late_credit: bool,
-    /// §4.5a: counters credited for the late-connect session, used to
-    /// seed the session when it opens.
-    pending_credit: Option<SessionCounters>,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -250,7 +247,6 @@ impl Core {
             wake_requested: false,
             sleep_requested: false,
             expect_late_credit: false,
-            pending_credit: None,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -609,7 +605,9 @@ impl Core {
             u32::from(capped.kcal),
             capped.duration_s,
         );
-        self.pending_credit = Some(capped);
+        // no session seed: the mirrored counters overwrite it in the same
+        // packet, and a stale seed would inflate the next record
+        // (REVIEW round-6 D4)
     }
 
     /// A session starts on the first running after stopped/disconnected.
@@ -618,13 +616,12 @@ impl Core {
             return;
         }
         self.may_open = false;
-        let credit = self.pending_credit.take().unwrap_or_default();
         self.session = Some(OpenSession {
             start: now_ts(),
-            distance_m: credit.distance_m,
-            steps: credit.steps,
-            kcal: credit.kcal,
-            duration_s: credit.duration_s,
+            distance_m: 0,
+            steps: 0,
+            kcal: 0,
+            duration_s: 0.0,
             max_speed_kmh: self.speed_kmh,
         });
         self.session_offset = SessionCounters::default();
@@ -783,7 +780,6 @@ impl Core {
         // a plain reconnect's first packet is a continuation baseline, not
         // a remote-started walk to credit (§4.4 vs §4.5a)
         self.expect_late_credit = false;
-        self.pending_credit = None;
         self.forget_settle();
         self.publish();
     }
@@ -818,7 +814,6 @@ impl Core {
         self.idle_since = None;
         // a remote-started walk during sleep must be credited at wake
         self.expect_late_credit = true;
-        self.pending_credit = None;
         self.publish();
     }
 
@@ -1522,8 +1517,8 @@ mod tests {
         // the belt was remote-started while asleep: counters already at 50 m
         c.on_packet(&st(p::BeltState::Running, 2.0, 50, 70, 5, 60.0));
         assert_eq!(c.snapshot().last_end_reason, None);
-        let ses = c.snapshot().session.expect("session opens with credit");
-        assert_eq!(ses.distance_m, 50, "session seeded with the credit");
+        let ses = c.snapshot().session.expect("session opens");
+        assert_eq!(ses.distance_m, 50, "mirrored counters are the live view");
         assert_eq!(c.totals.distance_m, 50, "credited once");
         // further packets must not double-credit
         c.on_packet(&st(p::BeltState::Running, 2.0, 60, 80, 6, 65.0));

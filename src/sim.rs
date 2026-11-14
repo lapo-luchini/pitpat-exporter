@@ -47,6 +47,9 @@ struct SimBelt {
     kcal_f: f64,
     duration_s: f64,
     starting_ends_at: Option<Instant>,
+    /// §4.5a: when the remote started the belt with nobody connected,
+    /// counters catch up to real elapsed time on the first tick.
+    remote_running_since: Option<Instant>,
     pending: Option<Command>,
     commanded_speed: f64,
 }
@@ -65,22 +68,37 @@ impl SimLink {
     /// advance on the next ticks of whichever connection exists.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn remote_start(&self, speed_kmh: f64) {
+        self.remote_start_with(speed_kmh, 0, 0, 0, 0.0);
+    }
+
+    /// §4.5a hook with explicit counters: a remote-started walk has been
+    /// going for a while, so the belt's offline counters are nonzero.
+    /// `distance_m`/`steps`/`kcal`/`duration_s` are the values the next
+    /// connection will report immediately.
+    #[allow(clippy::too_many_arguments)]
+    pub fn remote_start_with(
+        &self,
+        speed_kmh: f64,
+        distance_m: u32,
+        steps: u32,
+        kcal: u16,
+        duration_s: f64,
+    ) {
         let mut belt = self.belt.lock().expect("sim belt");
-        if belt.state == BeltState::Stopped {
-            belt.distance_m = 0;
-            belt.distance_f = 0.0;
-            belt.steps = 0;
-            belt.steps_f = 0.0;
-            belt.kcal = 0;
-            belt.kcal_f = 0.0;
-            belt.duration_s = 0.0;
-        }
+        belt.distance_m = distance_m;
+        belt.distance_f = distance_m as f64;
+        belt.steps = steps;
+        belt.steps_f = steps as f64;
+        belt.kcal = kcal;
+        belt.kcal_f = kcal as f64;
+        belt.duration_s = duration_s;
         belt.state = BeltState::Running;
         belt.commanded_speed = speed_kmh;
         belt.target = speed_kmh;
         belt.speed = speed_kmh;
         belt.starting_ends_at = None;
         belt.pending = None;
+        belt.remote_running_since = Some(Instant::now());
     }
 
     /// The shared drop flag so a signal task can flip it from elsewhere.
@@ -115,6 +133,7 @@ impl SimBelt {
             kcal_f: 0.0,
             duration_s: 0.0,
             starting_ends_at: None,
+            remote_running_since: None,
             pending: None,
             commanded_speed: 1.0,
         }
@@ -247,6 +266,20 @@ impl SimConn {
             .min(NOTIFY_PERIOD);
         let (state, dist, steps, kcal, dur) = {
             let mut belt = self.belt.lock().expect("sim belt");
+            // a remote-started belt kept counting while we slept (§4.5a)
+            if let Some(since) = belt.remote_running_since.take() {
+                if belt.state == BeltState::Running {
+                    let offline = tick.duration_since(since).as_secs_f64().min(3600.0);
+                    let metres = belt.speed * offline * 1000.0 / 3600.0;
+                    belt.distance_f += metres;
+                    belt.distance_m = belt.distance_f as u32;
+                    belt.steps_f += metres / 0.7;
+                    belt.steps = belt.steps_f as u32;
+                    belt.kcal_f += 0.5 * self.weight_kg as f64 * metres / 1000.0;
+                    belt.kcal = belt.kcal_f as u16;
+                    belt.duration_s += offline;
+                }
+            }
             belt.tick(dt, self.weight_kg)
         };
         let speed = {

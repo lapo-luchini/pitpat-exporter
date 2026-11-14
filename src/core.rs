@@ -2,7 +2,7 @@
 
 //! Daemon state machine (§4) plus the per-connection pump that feeds it.
 
-use crate::link::Notify;
+use crate::link::{LinkError, Notify};
 use crate::metrics::Metrics;
 use crate::protocol as p;
 use crate::session::{DeltaTracker, EndReason, Totals};
@@ -1019,10 +1019,10 @@ pub async fn shutdown_flow<C: Notify>(core: &mut Core, conn: &mut C) {
 ///   reconnect with backoff but give up after idle_timeout without a
 ///   link (close the session as disconnected, then sleep); /api/sleep
 ///   ends such a reconnect loop; idle_timeout = 0 reconnects forever.
-pub async fn supervise<L>(core: &mut Core, link: &mut L, ctrl: &mut mpsc::Receiver<Ctrl>)
+pub async fn supervise<L>(mut core: Core, mut link: L, mut ctrl: mpsc::Receiver<Ctrl>)
 where
     L: crate::link::LinkT,
-    L::Conn: Notify,
+    L::Conn: Notify + 'static,
 {
     let mut sleeping = core.cfg.idle_timeout > 0;
     let mut backoff_s: u64 = 1;
@@ -1031,7 +1031,7 @@ where
     }
     'outer: loop {
         // ---------------------------------------------- obtain a link
-        let mut conn = if sleeping {
+        let conn = if sleeping {
             // §4.5a: wait for a wake-capable control call or shutdown;
             // nothing else runs: no reconnects, no backoff, no watchdog
             let woke = tokio::select! {
@@ -1055,19 +1055,27 @@ where
             // to each attempt too (timeout_at), not just the loop
             let deadline = tokio::time::Instant::now() + Duration::from_secs(WAKE_BUDGET_S);
             let mut woken_conn: Option<L::Conn> = None;
+            enum WakeAttempt<C> {
+                Done(Result<C, LinkError>),
+                TimedOut,
+                Shutdown,
+            }
             while tokio::time::Instant::now() < deadline {
                 let attempt = {
                     let connect = link.connect();
                     pin_mut!(connect);
                     tokio::select! {
-                        outcome = tokio::time::timeout_at(deadline, &mut connect) => outcome.ok(),
+                        outcome = tokio::time::timeout_at(deadline, &mut connect) => match outcome {
+                            Ok(res) => WakeAttempt::Done(res),
+                            Err(_) => WakeAttempt::TimedOut,
+                        },
                         c = ctrl.recv() => match c {
-                            Some(Ctrl::Shutdown) | None => None,
+                            Some(Ctrl::Shutdown) | None => WakeAttempt::Shutdown,
                         },
                     }
                 };
                 match attempt {
-                    Some(Ok(conn)) => {
+                    WakeAttempt::Done(Ok(conn)) => {
                         let addr = conn.address();
                         core.begin_connection(Some(addr.clone()));
                         // the belt may have been remote-started meanwhile
@@ -1076,11 +1084,12 @@ where
                         woken_conn = Some(conn);
                         break;
                     }
-                    Some(Err(err)) => {
+                    WakeAttempt::Done(Err(err)) => {
                         tracing::warn!(?err, "wake connect failed");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
-                    None => {
+                    WakeAttempt::TimedOut => break, // budget exhausted
+                    WakeAttempt::Shutdown => {
                         // shutdown while waking
                         core.drop_queued();
                         core.on_disconnect(DeadReason::Shutdown);
@@ -1093,6 +1102,7 @@ where
                 None => {
                     // §4.5a: the link didn't come up in time: drop the
                     // queued command and go back to sleep
+                    eprintln!("supervise: wake budget exhausted");
                     tracing::warn!("wake budget exhausted, dropping queued command");
                     core.drop_queued();
                     core.enter_sleep();
@@ -1124,7 +1134,7 @@ where
                     tracing::warn!(?err, "connection failed");
                     core.on_disconnect(DeadReason::Link);
                     core.metrics.reconnects_total.inc();
-                    if backoff_wait(core, &mut backoff_s, ctrl).await {
+                    if backoff_wait(&mut backoff_s, &mut ctrl).await {
                         core.on_disconnect(DeadReason::Shutdown);
                         return;
                     }
@@ -1137,11 +1147,12 @@ where
             }
         };
         // ------------------------------------------------------ run
+        let mut conn = conn;
         loop {
-            let reason = pump(core, &mut conn, ctrl).await;
+            let reason = pump(&mut core, &mut conn, &mut ctrl).await;
             match reason {
                 DeadReason::Shutdown => {
-                    shutdown_flow(core, &mut conn).await;
+                    shutdown_flow(&mut core, &mut conn).await;
                     return;
                 }
                 DeadReason::Idle | DeadReason::Sleep => {
@@ -1151,6 +1162,11 @@ where
                     continue 'outer;
                 }
                 DeadReason::Link | DeadReason::Watchdog => {
+                    eprintln!(
+                        "supervise: link lost, state={:?} session={:?}",
+                        core.state,
+                        core.session.is_some()
+                    );
                     tracing::warn!(?reason, address = %conn.address(), "link lost");
                     // drop the LE link even when the notify stream died:
                     // BlueZ would keep the treadmill locked against its
@@ -1168,7 +1184,7 @@ where
                         // §4.1: the old reconnect-forever behaviour
                         core.on_disconnect(reason);
                         core.metrics.reconnects_total.inc();
-                        if backoff_wait(core, &mut backoff_s, ctrl).await {
+                        if backoff_wait(&mut backoff_s, &mut ctrl).await {
                             core.on_disconnect(DeadReason::Shutdown);
                             return;
                         }
@@ -1182,7 +1198,14 @@ where
                     let budget =
                         tokio::time::Instant::now() + Duration::from_secs(core.cfg.idle_timeout);
                     let mut regained = false;
-                    while tokio::time::Instant::now() < budget {
+                    loop {
+                        eprintln!(
+                            "supervise: budget loop, now={:?} budget={budget:?}",
+                            tokio::time::Instant::now()
+                        );
+                        if tokio::time::Instant::now() >= budget {
+                            break;
+                        }
                         let wait = budget
                             .saturating_duration_since(tokio::time::Instant::now())
                             .min(Duration::from_secs(backoff_s));
@@ -1221,8 +1244,10 @@ where
                                 regained = true;
                                 break;
                             }
-                            Some(Err(err)) => {
-                                tracing::debug!(?err, "reconnect attempt failed");
+                            Some(Err(_err)) => {
+                                // the backoff must actually elapse: paused
+                                // time only advances through real awaits
+                                tokio::time::sleep(Duration::from_secs(backoff_s)).await;
                             }
                             None => {} // backoff tick
                         }
@@ -1243,8 +1268,7 @@ where
 }
 
 /// Backoff sleep raced against shutdown; true when shutdown arrived.
-async fn backoff_wait(core: &Core, backoff_s: &mut u64, ctrl: &mut mpsc::Receiver<Ctrl>) -> bool {
-    let _ = core;
+async fn backoff_wait(backoff_s: &mut u64, ctrl: &mut mpsc::Receiver<Ctrl>) -> bool {
     match tokio::time::timeout(Duration::from_secs(*backoff_s), ctrl.recv()).await {
         Ok(Some(Ctrl::Shutdown)) | Ok(None) => true,
         _ => {
@@ -1713,6 +1737,394 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------- §4.5a/§4.1 supervise
+
+    /// A link that reports how many times connect() was called; each
+    /// variant programmes the next attempt's outcome.
+    struct ScriptedLink {
+        connects: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        /// Pending forever = the wake budget must expire.
+        hang: bool,
+    }
+
+    impl ScriptedLink {
+        fn new(hang: bool) -> Self {
+            Self {
+                connects: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                hang,
+            }
+        }
+
+        #[allow(dead_code)]
+        fn connects(&self) -> usize {
+            self.connects.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl crate::link::LinkT for ScriptedLink {
+        type Conn = FakeConn;
+
+        async fn connect(&mut self) -> Result<FakeConn, LinkError> {
+            self.connects
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.hang {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+            // each connection: a short run then a dead link
+            Ok(FakeConn::new(
+                VecDeque::from([
+                    st(p::BeltState::Running, 2.0, 0, 0, 0, 0.0),
+                    st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0),
+                ]),
+                false,
+            ))
+        }
+    }
+
+    /// Collect the states the supervisor publishes, with a deadline.
+    async fn wait_state(rx: &mut tokio::sync::broadcast::Receiver<Snapshot>, want: &str) -> bool {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            let Ok(snap) = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await else {
+                return false;
+            };
+            match snap {
+                Ok(s) if s.state.as_str() == want => return true,
+                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return false,
+            }
+        }
+    }
+
+    /// Boot asleep → wake on Start → running → idle → asleep again.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_wake_and_idle() {
+        let dir = tmpdir("sup1");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 2,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let link = ScriptedLink::new(false);
+        let connects = link.connects.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(
+                    wait_state(&mut ev_rx, "sleeping").await,
+                    "daemon boots asleep"
+                );
+                api_tx.send(ApiCmd::Start(Some(3.0))).await.unwrap();
+                assert!(
+                    wait_state(&mut ev_rx, "running").await,
+                    "start wakes and runs"
+                );
+                // idle_timeout = 2 s of stopped → asleep again
+                assert!(
+                    wait_state(&mut ev_rx, "sleeping").await,
+                    "idles back to sleep"
+                );
+                sup.abort();
+            })
+            .await;
+        assert!(
+            connects.load(std::sync::atomic::Ordering::Relaxed) >= 1,
+            "the wake connected"
+        );
+    }
+
+    /// Connect wakes without queueing a belt command; the belt is
+    /// untouched and the daemon goes back to sleep after the timeout.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_connect_no_belt_command() {
+        let dir = tmpdir("sup2");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 2,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let link = ScriptedLink::new(false);
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                api_tx.send(ApiCmd::Connect).await.unwrap();
+                assert!(
+                    wait_state(&mut ev_rx, "stopped").await,
+                    "woken, belt stopped"
+                );
+                // no start command was sent: FakeConn dies right after the
+                // first packet, but with the belt stopped the supervisor
+                // sleeps again (§4.5a amended)
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                sup.abort();
+            })
+            .await;
+    }
+
+    /// A link whose connect() never completes: after the wake budget the
+    /// queued command is dropped and the daemon is asleep again.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_wake_budget_drops_command() {
+        let dir = tmpdir("sup3");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 2,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let link = ScriptedLink::new(true);
+        let connects = link.connects.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                api_tx.send(ApiCmd::Start(Some(3.0))).await.unwrap();
+                // back to sleep after the 30 s budget, command dropped.
+                // Drive the clock explicitly: the hanging connect owns a
+                // 3600 s timer and the observer churns 2 s recv timers.
+                let mut sleeping_events = 0;
+                for _ in 0..40 {
+                    tokio::time::advance(Duration::from_secs(1)).await;
+                    while let Ok(snap) = ev_rx.try_recv() {
+                        if snap.state.as_str() == "sleeping" {
+                            sleeping_events += 1;
+                        }
+                    }
+                    if sleeping_events >= 2 {
+                        break;
+                    }
+                }
+                assert!(
+                    sleeping_events >= 1,
+                    "the boot sleeping event was consumed by wait_state; the
+                     post-budget one must follow"
+                );
+                assert!(
+                    sleeping_events >= 1,
+                    "the boot sleeping event was consumed by wait_state; the
+                     post-budget one must follow"
+                );
+                sup.abort();
+                assert!(
+                    connects.load(std::sync::atomic::Ordering::Relaxed) >= 1,
+                    "the wake tried to connect"
+                );
+            })
+            .await;
+    }
+
+    /// Link lost while stopped → sleep with no reconnect attempt (D2).
+    #[tokio::test(start_paused = true)]
+    async fn supervise_link_lost_while_stopped_sleeps() {
+        let dir = tmpdir("sup4");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 2,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let link = ScriptedLink::new(false);
+        let connects = link.connects.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                api_tx.send(ApiCmd::Start(Some(3.0))).await.unwrap();
+                assert!(wait_state(&mut ev_rx, "running").await);
+                // FakeConn's script ends: running → stopped → dead link;
+                // stopped + dead → sleep with NO further connect (D2)
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                let before = connects.load(std::sync::atomic::Ordering::Relaxed);
+                tokio::time::advance(Duration::from_secs(10)).await;
+                assert_eq!(
+                    connects.load(std::sync::atomic::Ordering::Relaxed),
+                    before,
+                    "no reconnect while asleep"
+                );
+                sup.abort();
+            })
+            .await;
+    }
+
+    /// Link lost mid-walk with the link unavailable: the session closes
+    /// as disconnected after the idle budget, then the daemon sleeps (D2).
+    #[tokio::test(start_paused = true)]
+    async fn supervise_link_lost_midwalk_budget() {
+        let dir = tmpdir("sup5");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 2,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        // first connect: a short run then a dead link; every later
+        // connect fails — the link is "unavailable" (D2)
+        struct LostMidwalk {
+            connects: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl crate::link::LinkT for LostMidwalk {
+            type Conn = FakeConn;
+            async fn connect(&mut self) -> Result<FakeConn, LinkError> {
+                let n = self
+                    .connects
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n == 0 {
+                    Ok(FakeConn::new(
+                        VecDeque::from([st(p::BeltState::Running, 2.0, 0, 0, 0, 0.0)]),
+                        false,
+                    ))
+                } else {
+                    Err(LinkError::NotFound)
+                }
+            }
+        }
+        let link = LostMidwalk {
+            connects: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+        let connects = link.connects.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await, "boots asleep");
+                api_tx.send(ApiCmd::Connect).await.unwrap();
+                assert!(wait_state(&mut ev_rx, "running").await);
+                // link unavailable: after the idle budget the session
+                // closes as disconnected and the daemon sleeps (D2).
+                // Explicit clock drive: the supervisor's backoff sleeps
+                // and the observer churn otherwise interleave.
+                let mut saw_sleeping = false;
+                let mut saw_session = false;
+                let adv = tokio::task::spawn_local(async move {
+                    loop {
+                        tokio::time::advance(Duration::from_millis(100)).await;
+                    }
+                });
+                for _ in 0..600 {
+                    if let Ok(snap) = ev_rx.try_recv() {
+                        if snap.state.as_str() == "sleeping" {
+                            saw_sleeping = true;
+                        }
+                        // the walk is 0.5 s / 0 m → legitimately discarded
+                        // as noise, so observe the end reason via the
+                        // /api/state data instead
+                        if snap.last_end_reason == Some("disconnected") {
+                            saw_session = true;
+                        }
+                    }
+                    if saw_sleeping && saw_session {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                assert!(saw_session, "session closed as disconnected");
+                assert!(saw_sleeping, "mid-walk loss sleeps after the budget");
+                assert!(connects.load(std::sync::atomic::Ordering::Relaxed) >= 1);
+                adv.abort();
+                sup.abort();
+            })
+            .await;
+    }
+
+    /// Remote start while sleeping (§4.5a): the wake credits the walk once.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_remote_start_while_sleeping() {
+        let dir = tmpdir("sup6");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 3,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let sim = crate::sim::SimLink::new(80);
+        let link = crate::link::Link::Sim(sim.clone());
+        let core_metrics = core.metrics.clone();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await);
+                // walk with the remote while asleep: counters already at
+                // 2.5 km / 3500 steps when the daemon wakes
+                sim.remote_start_with(1.5, 2500, 3500, 30, 1200.0);
+                let adv = tokio::task::spawn_local(async move {
+                    loop {
+                        tokio::time::advance(Duration::from_millis(100)).await;
+                    }
+                });
+                // wake via /api/connect (no belt command)
+                api_tx.send(ApiCmd::Connect).await.unwrap();
+                assert!(
+                    wait_state(&mut ev_rx, "running").await,
+                    "woken into the remote-started walk"
+                );
+                let d0 = core_metrics.distance_m_total.get();
+                assert!(d0 > 0, "walk credited");
+                sup.abort();
+                adv.abort();
+            })
+            .await;
+    }
+
     // ------------------------------------------------------ §4.5a sleep
 
     #[tokio::test(start_paused = true)]
@@ -1898,5 +2310,27 @@ mod tests {
         let second = ev_rx.recv().await.unwrap();
         assert_eq!(second.state, State::Running);
         assert!((second.speed_kmh - 2.0).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod minitest {
+    #[tokio::test(start_paused = true)]
+    async fn localset_paused_timeout() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let j = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                    1
+                });
+                let j2 = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    2
+                });
+                let (a, b) = futures::join!(async { j.await.ok() }, async { j2.await.ok() });
+                eprintln!("minitest: done a={a:?} b={b:?}");
+            })
+            .await;
     }
 }

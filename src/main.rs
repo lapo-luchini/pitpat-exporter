@@ -256,7 +256,7 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
 
     // signal bookkeeping (§4.6): TERM/INT → Ctrl::Shutdown; USR1 sets the
     // simulators's drop flag (§4.7). Everything flows through one task.
-    let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<core::Ctrl>(4);
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<core::Ctrl>(4);
     let sim_flag = if cfg.simulate {
         tracing::info!("simulator link enabled (--simulate)");
         Some(sim::SimLink::new(cfg.weight_kg))
@@ -268,7 +268,7 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         sim_flag.as_ref().map(|s| s.drop_flag()),
     ));
 
-    let mut link = match sim_flag {
+    let link = match sim_flag {
         Some(s) => link::Link::Sim(s),
         None => link::Link::Ble(ble::BleLink::new(
             cfg.adapter.clone(),
@@ -276,7 +276,7 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
             Some(cfg.state_dir.clone()),
         )),
     };
-    let mut core = core::Core::new(
+    let core = core::Core::new(
         config::DaemonCfg::from(&cfg),
         totals,
         metrics.clone(),
@@ -288,11 +288,10 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
     // §4.5a + §4.1: the whole link policy (sleep/wake, reconnect
     // backoff, link-loss handling) lives in the supervisor, tested
     // against scripted links (REVIEW round-6 D2/D3)
-    core::supervise(&mut core, &mut link, &mut ctrl_rx).await;
+    core::supervise(core, link, ctrl_rx).await;
 
     server.abort();
     bridge.abort();
-    core.persist();
     ExitCode::SUCCESS
 }
 

@@ -178,6 +178,8 @@ pub const WATCHDOG_S: u64 = 10;
 pub const PERSIST_S: u64 = 60;
 /// F1: settle-sync suppression window after a daemon-issued start.
 pub const SETTLE_SUPPRESS_S: u64 = 10;
+/// F1/G2: at most this many SetSpeed corrections per start.
+pub const MAX_START_CORRECT: u8 = 3;
 /// §4.5a: a wake must have the link up within this budget, or the queued
 /// command is dropped and the daemon goes back to sleep.
 pub const WAKE_BUDGET_S: u64 = 30;
@@ -214,6 +216,7 @@ pub struct Core {
     /// is not erased.
     pending_start_speed: Option<f64>,
     settle_suppress_until: Option<tokio::time::Instant>,
+    start_correct_tries: u8,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -260,6 +263,7 @@ impl Core {
             expect_late_credit: false,
             pending_start_speed: None,
             settle_suppress_until: None,
+            start_correct_tries: 0,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -421,6 +425,10 @@ impl Core {
                     self.wake_requested = true;
                 }
                 self.idle_since = Some(tokio::time::Instant::now());
+                // user override: the start-speed correction is cancelled
+                self.pending_start_speed = None;
+                self.start_correct_tries = 0;
+                self.settle_suppress_until = None;
                 self.forget_settle();
                 self.queue_back(WireCmd::Pause)
             }
@@ -429,6 +437,9 @@ impl Core {
                     self.wake_requested = true;
                 }
                 self.idle_since = Some(tokio::time::Instant::now());
+                self.pending_start_speed = None;
+                self.start_correct_tries = 0;
+                self.settle_suppress_until = None;
                 // stop must never wait behind anything (§3.5)
                 self.queue.clear();
                 self.pending_write = None;
@@ -440,6 +451,10 @@ impl Core {
                 // §4.5a (amended): a speed change while sleeping only
                 // updates the remembered target — no wake, no beep
                 self.idle_since = Some(tokio::time::Instant::now());
+                // user override
+                self.pending_start_speed = None;
+                self.start_correct_tries = 0;
+                self.settle_suppress_until = None;
                 let v = self.clamp(v);
                 self.target_speed_kmh = v;
                 self.forget_settle();
@@ -449,8 +464,12 @@ impl Core {
                 Ok(())
             }
             ApiCmd::SpeedDelta(d) => {
-                // §4.5a (amended): no wake, like SpeedAbs
+                // §4.5a (amended): no wake, like SpeedAbs; also a user
+                // override of the start-speed correction
                 self.idle_since = Some(tokio::time::Instant::now());
+                self.pending_start_speed = None;
+                self.start_correct_tries = 0;
+                self.settle_suppress_until = None;
                 let v = self.clamp(self.target_speed_kmh + d);
                 self.target_speed_kmh = v;
                 self.forget_settle();
@@ -576,21 +595,57 @@ impl Core {
     /// F1: on the first running packet after a daemon-issued start, make
     /// the belt go to the requested speed (it ignored the start command's
     /// speed field) and suppress the settle-sync until it gets there.
+    /// F1/G2: this model ignores the start command's speed and reports
+    /// target 0 during the starting countdown. Act only on `running`
+    /// packets; keep the pending speed until the belt reports it, re-
+    /// queueing SetSpeed at most MAX_START_CORRECT times (the one-shot
+    /// version could spend itself on the countdown and let the 1.0
+    /// default settle back in). The suppression ends when the belt
+    /// reports the requested target, or after the window — whichever
+    /// comes first — so the §3.6 remote pickup keeps working.
     fn correct_start_speed(&mut self, st: &p::Status, belt: State) {
-        if let Some(v) = self.pending_start_speed.take() {
-            if belt == State::Running || belt == State::Starting {
-                self.settle_suppress_until =
-                    Some(tokio::time::Instant::now() + Duration::from_secs(SETTLE_SUPPRESS_S));
-                if !eq_speed(st.target_speed_kmh, v) {
-                    tracing::info!(
-                        target = st.target_speed_kmh,
-                        want = v,
-                        "belt ignored the start speed; queueing SetSpeed"
-                    );
-                    // full queue: the correction is dropped, the next
-                    // settle-sync will still pick the speed up later
-                    let _ = self.queue_set_speed(v);
-                }
+        let Some(v) = self.pending_start_speed else {
+            return;
+        };
+        if belt != State::Running {
+            return; // act only on running packets
+        }
+        if self.settle_suppress_until.is_none() {
+            self.settle_suppress_until =
+                Some(tokio::time::Instant::now() + Duration::from_secs(SETTLE_SUPPRESS_S));
+        }
+        if eq_speed(st.target_speed_kmh, v) {
+            // the belt got there: normal remote pickup resumes
+            self.pending_start_speed = None;
+            self.start_correct_tries = 0;
+            self.settle_suppress_until = None;
+            return;
+        }
+        if self
+            .settle_suppress_until
+            .is_some_and(|d| tokio::time::Instant::now() >= d)
+        {
+            // give up: log so the behaviour is visible
+            tracing::warn!(
+                want = v,
+                "belt never reported the requested start speed; giving up"
+            );
+            self.pending_start_speed = None;
+            self.start_correct_tries = 0;
+            self.settle_suppress_until = None;
+            return;
+        }
+        // re-queue every other running packet, at most MAX times
+        if self.start_correct_tries < MAX_START_CORRECT {
+            self.start_correct_tries += 1;
+            if self.start_correct_tries % 2 == 1 {
+                tracing::info!(
+                    target = st.target_speed_kmh,
+                    want = v,
+                    try = self.start_correct_tries,
+                    "belt targets its own default; queueing SetSpeed"
+                );
+                let _ = self.queue_set_speed(v);
             }
         }
     }
@@ -2306,6 +2361,62 @@ mod tests {
                 assert!(!sessions.is_empty(), "the first walk was recorded");
                 sup.abort();
                 let _ = connects.load(std::sync::atomic::Ordering::Relaxed);
+            })
+            .await;
+    }
+
+    /// G2 end-to-end: sleeping → the user picks 2.5 → Start → the belt
+    /// ramps to its own 1.0 default, the daemon re-asserts 2.5 with a
+    /// SetSpeed retry, and the target stays 2.5.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_start_speed_reasserted() {
+        let dir = tmpdir("sup8");
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (_ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 30,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let sim = crate::sim::SimLink::new(80);
+        let link = crate::link::Link::Sim(sim.clone());
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await, "boots asleep");
+
+                // the user picks 2.5, then Start (both from the widget)
+                api_tx.send(ApiCmd::SpeedAbs(2.5)).await.unwrap();
+                api_tx.send(ApiCmd::Start(None)).await.unwrap();
+
+                assert!(wait_state(&mut ev_rx, "running").await, "woken and running");
+                // the belt ramps to its own 1.0; the daemon re-asserts 2.5
+                // and the belt follows; the daemon's target stays 2.5 the
+                // whole time. Poll the published snapshots for target 2.5.
+                let mut settled = false;
+                for _ in 0..300 {
+                    tokio::time::advance(Duration::from_millis(100)).await;
+                    while let Ok(snap) = ev_rx.try_recv() {
+                        if (snap.target_speed_kmh - 2.5).abs() < 1e-9
+                            && (snap.speed_kmh - 2.5).abs() < 1e-6
+                        {
+                            settled = true;
+                        }
+                    }
+                    if settled {
+                        break;
+                    }
+                }
+                assert!(settled, "belt settled at the requested 2.5 with target 2.5");
+                sup.abort();
             })
             .await;
     }

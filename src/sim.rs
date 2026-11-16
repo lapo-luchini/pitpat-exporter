@@ -154,7 +154,12 @@ impl SimBelt {
                 }
             }
             Command::SetSpeed => {
-                self.target = self.commanded_speed;
+                // G2: the pessimistic hardware assumption — set-speed is
+                // ignored while the starting countdown runs; only Running
+                // packets accept it (this exercises the daemon's retry)
+                if self.state == BeltState::Running {
+                    self.target = self.commanded_speed;
+                }
             }
             Command::Pause => {
                 if self.state == BeltState::Running || self.state == BeltState::Starting {
@@ -371,7 +376,38 @@ mod tests {
         c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
             .await
             .unwrap();
-        c.recv_notification().await.unwrap(); // starting packet
+        let starting = c.recv_notification().await.unwrap();
+        assert_eq!(
+            crate::protocol::decode_status(&starting)
+                .unwrap()
+                .belt_state(),
+            BeltState::Starting
+        );
+        // G2: during the countdown SetSpeed is ignored (the pessimistic
+        // hardware assumption) and consumed
+        c.write_packet(&crate::protocol::encode_command(
+            Command::SetSpeed,
+            3.0,
+            80,
+            1,
+        ))
+        .await
+        .unwrap();
+        let pkt = c.recv_notification().await.unwrap();
+        let st = crate::protocol::decode_status(&pkt).unwrap();
+        if st.belt_state() == BeltState::Starting {
+            assert!(
+                (st.target_speed_kmh - 1.0).abs() < 1e-9,
+                "still the default"
+            );
+        }
+        // wait out the countdown, re-send once running, and it applies
+        for _ in 0..30 {
+            let p = c.recv_notification().await.unwrap();
+            if crate::protocol::decode_status(&p).unwrap().belt_state() == BeltState::Running {
+                break;
+            }
+        }
         c.write_packet(&crate::protocol::encode_command(
             Command::SetSpeed,
             3.0,

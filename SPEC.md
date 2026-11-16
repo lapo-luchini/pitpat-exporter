@@ -138,7 +138,9 @@ Hardware note (the 52-byte variant seen on real hardware, C4:A9:B8:…):
 the frame starts `68 34` and is 52 bytes long, but the field offsets
 above are unchanged and the values decoded correctly. Bytes 11–19
 (steps @14 and kcal @18) were all zero at ~1 km/h even after ~30 s and
-some metres of walking, so this model hasn't shown steps/kcal yet. The
+some metres of walking; the user later confirmed kcal IS reported
+correctly (so kcal @18 is right), while steps stayed 0 — likely not
+counted at low speeds. The
 UI hides a counter that is still 0 while the session distance exceeds
 ~50 m ("not reported"); metrics and sessions.jsonl keep 0, which is
 the truthful value. The tail carries what looks like a device serial.

@@ -171,9 +171,10 @@ async function sessions(){
   try{
     const list=await(await fetch('/api/sessions?limit=10')).json();
     $('sess').innerHTML=list.map(x=>{
-      // F4: unreported counters are hidden per row
-      const steps=x.steps>0?`<td>${x.steps}</td>`:'';
-      const kcal=x.kcal>0?`<td>${x.kcal} kcal</td>`:'';
+      // F4/G3: unreported counters render an empty cell so the columns
+      // stay aligned between rows
+      const steps=x.steps>0?`<td>${x.steps}</td>`:'<td></td>';
+      const kcal=x.kcal>0?`<td>${x.kcal} kcal</td>`:'<td></td>';
       return '<tr><td>'+new Date(x.start).toLocaleString()+'</td>'+
       '<td>'+(x.distance_m/1000).toFixed(2)+' km</td>'+steps+kcal+
       '<td>'+Math.round(x.duration_s/60)+' min</td></tr>';}).join('');

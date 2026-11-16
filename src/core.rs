@@ -440,9 +440,7 @@ impl Core {
                     self.wake_requested = true;
                 }
                 self.idle_since = Some(tokio::time::Instant::now());
-                self.pending_start_speed = None;
-                self.start_correct_tries = 0;
-                self.settle_suppress_until = None;
+                self.cancel_start_correction();
                 // stop must never wait behind anything (§3.5)
                 self.queue.clear();
                 self.pending_write = None;
@@ -468,9 +466,7 @@ impl Core {
                 // §4.5a (amended): no wake, like SpeedAbs; also a user
                 // override of the start-speed correction
                 self.idle_since = Some(tokio::time::Instant::now());
-                self.pending_start_speed = None;
-                self.start_correct_tries = 0;
-                self.settle_suppress_until = None;
+                self.cancel_start_correction();
                 let v = self.clamp(self.target_speed_kmh + d);
                 self.target_speed_kmh = v;
                 self.forget_settle();

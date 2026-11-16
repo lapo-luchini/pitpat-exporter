@@ -40,7 +40,7 @@ Item {
     }
 
     // H2: a thin panel still shows the distance — the user asked for it
-    readonly property bool showDistance: onMove && !vertical && lines >= 0
+    readonly property bool showDistance: onMove && !vertical
 
     Kirigami.Icon {
         id: icon
@@ -117,9 +117,9 @@ Item {
 
     // width follows the widest visible line plus the icon (G1: sized from
     // content, not anchored to the parent, so nothing is clipped)
+    // G1/I1: singleLine covers lines <= 1 (distance-only or distance·speed)
     Layout.minimumWidth: icon.width + Kirigami.Units.smallSpacing
-        + (compact.showDistance ? distanceLine.implicitWidth : 0)
-        + (compact.onMove && compact.lines === 1 ? singleLine.implicitWidth : 0)
+        + (compact.showDistance && compact.lines <= 1 ? singleLine.implicitWidth : 0)
         + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
     Layout.preferredWidth: Layout.minimumWidth
     Layout.minimumHeight: Kirigami.Units.gridUnit * 2

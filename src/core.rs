@@ -2491,6 +2491,128 @@ mod tests {
             .await;
     }
 
+    /// I3: SIGTERM while running records the open session as `shutdown`
+    /// and writes totals.json (user-verified on hardware; pinned here).
+    #[tokio::test(start_paused = true)]
+    async fn supervise_shutdown_records_session() {
+        let dir = tmpdir("sup9");
+        let dir2 = dir.clone();
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 0,
+                ..cfg()
+            }, // always connected
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        let sim = crate::sim::SimLink::new(80);
+        let link = crate::link::Link::Sim(sim.clone());
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(
+                    wait_state(&mut ev_rx, "stopped").await,
+                    "boots connected (idle_timeout = 0)"
+                );
+                api_tx.send(ApiCmd::Start(Some(3.0))).await.unwrap();
+                assert!(wait_state(&mut ev_rx, "running").await);
+                // let the belt walk a while
+                for _ in 0..60 {
+                    tokio::time::advance(Duration::from_secs(1)).await;
+                    while let Ok(snap) = ev_rx.try_recv() {
+                        if snap.session.is_some_and(|s| s.distance_m > 20) {
+                            break;
+                        }
+                    }
+                }
+                // SIGTERM
+                ctrl_tx.send(Ctrl::Shutdown).await.unwrap();
+                let sup_result = sup.await;
+                assert!(
+                    sup_result.is_ok(),
+                    "supervise finished on shutdown without panicking"
+                );
+                // the session is recorded as shutdown with a real distance
+                let recs = crate::session::read_sessions(&dir2, 4);
+                assert!(!recs.is_empty(), "a session was written");
+                assert_eq!(recs[0].end_reason, "shutdown");
+                assert!(recs[0].distance_m > 0);
+                // totals.json exists with sessions == 1
+                let totals = crate::session::load_totals(&dir2);
+                assert_eq!(totals.sessions, 1);
+                // the sim belt is stopped (counters reset)
+                let mut c = sim.connect().await.unwrap();
+                let pkt = c.recv_notification().await.unwrap();
+                assert_eq!(
+                    crate::protocol::decode_status(&pkt).unwrap().belt_state(),
+                    crate::protocol::BeltState::Stopped
+                );
+            })
+            .await;
+    }
+
+    /// I3: shutdown during the mid-walk reconnect backoff must not write
+    /// the (already closed) session twice.
+    #[tokio::test(start_paused = true)]
+    async fn supervise_shutdown_during_reconnect_writes_once() {
+        let dir = tmpdir("sup10");
+        let dir2 = dir.clone();
+        let (events, mut ev_rx) = tokio::sync::broadcast::channel(64);
+        let (api_tx, api_rx) = mpsc::channel(8);
+        let (ctrl_tx, ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let core = Core::new(
+            DaemonCfg {
+                idle_timeout: 60,
+                ..cfg()
+            },
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir,
+        );
+        // one short walk then the link is gone for good
+        struct LostForGood;
+        impl crate::link::LinkT for LostForGood {
+            type Conn = FakeConn;
+            async fn connect(&mut self) -> Result<FakeConn, LinkError> {
+                Ok(FakeConn::new(
+                    VecDeque::from([st(p::BeltState::Running, 2.0, 0, 0, 0, 12.0)]),
+                    false,
+                ))
+            }
+        }
+        let link = LostForGood;
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let sup = tokio::task::spawn_local(supervise(core, link, ctrl_rx));
+                assert!(wait_state(&mut ev_rx, "sleeping").await, "boots asleep");
+                api_tx.send(ApiCmd::Connect).await.unwrap();
+                assert!(wait_state(&mut ev_rx, "running").await);
+                // the link dies mid-walk; the supervisor reconnects with a
+                // long budget (idle_timeout = 60)
+                assert!(wait_state(&mut ev_rx, "disconnected").await);
+                // SIGTERM during the reconnect backoff
+                ctrl_tx.send(Ctrl::Shutdown).await.unwrap();
+                let sup_result = sup.await;
+                assert!(sup_result.is_ok());
+                // exactly one session record, already closed as
+                // disconnected, NOT written again as shutdown
+                let recs = crate::session::read_sessions(&dir2, 10);
+                assert_eq!(recs.len(), 1, "no duplicate record");
+                assert_eq!(recs[0].end_reason, "disconnected");
+            })
+            .await;
+    }
+
     /// Remote start while sleeping (§4.5a): the wake credits the walk once.
     #[tokio::test(start_paused = true)]
     async fn supervise_remote_start_while_sleeping() {

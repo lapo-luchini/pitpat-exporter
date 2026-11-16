@@ -1135,7 +1135,18 @@ where
                     }
                     WakeAttempt::Done(Err(err)) => {
                         tracing::warn!(?err, "wake connect failed");
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        // the retry sleep is raced against shutdown, like
+                        // every other wait in the supervisor
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                            c = ctrl.recv() => match c {
+                                Some(Ctrl::Shutdown) | None => {
+                                    core.drop_queued();
+                                    core.on_disconnect(DeadReason::Shutdown);
+                                    return;
+                                }
+                            },
+                        }
                     }
                     WakeAttempt::TimedOut => break, // budget exhausted
                     WakeAttempt::Shutdown => {

@@ -2469,15 +2469,23 @@ mod tests {
 
                 assert!(wait_state(&mut ev_rx, "running").await, "woken and running");
                 // the belt ramps to its own 1.0; the daemon re-asserts 2.5
-                // and the belt follows; the daemon's target stays 2.5 the
-                // whole time. Poll the published snapshots for target 2.5.
+                // and the belt follows. The user-visible part of the bug
+                // (round-10/11): after the Start, every running snapshot
+                // must show the requested target 2.5 — a snapshot with a
+                // different target fails the test instead of just not
+                // counting as settled.
                 let mut settled = false;
                 for _ in 0..300 {
                     tokio::time::advance(Duration::from_millis(100)).await;
                     while let Ok(snap) = ev_rx.try_recv() {
-                        if (snap.target_speed_kmh - 2.5).abs() < 1e-9
-                            && (snap.speed_kmh - 2.5).abs() < 1e-6
-                        {
+                        if snap.state.as_str() == "running" {
+                            assert!(
+                                (snap.target_speed_kmh - 2.5).abs() < 1e-9,
+                                "target drifted to {} after the Start",
+                                snap.target_speed_kmh
+                            );
+                        }
+                        if (snap.speed_kmh - 2.5).abs() < 1e-6 {
                             settled = true;
                         }
                     }
@@ -2492,7 +2500,8 @@ mod tests {
     }
 
     /// I3: SIGTERM while running records the open session as `shutdown`
-    /// and writes totals.json (user-verified on hardware; pinned here).
+    /// and writes totals.json (verified on the simulator by the user;
+    /// pinned here).
     #[tokio::test(start_paused = true)]
     async fn supervise_shutdown_records_session() {
         let dir = tmpdir("sup9");
@@ -2523,12 +2532,12 @@ mod tests {
                 );
                 api_tx.send(ApiCmd::Start(Some(3.0))).await.unwrap();
                 assert!(wait_state(&mut ev_rx, "running").await);
-                // let the belt walk a while
-                for _ in 0..60 {
+                // let the belt walk a while (a flag breaks both loops)
+                'walk: for _ in 0..60 {
                     tokio::time::advance(Duration::from_secs(1)).await;
                     while let Ok(snap) = ev_rx.try_recv() {
                         if snap.session.is_some_and(|s| s.distance_m > 20) {
-                            break;
+                            break 'walk;
                         }
                     }
                 }

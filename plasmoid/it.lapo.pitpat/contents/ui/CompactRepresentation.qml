@@ -49,9 +49,14 @@ Item {
             left: parent.left
             verticalCenter: parent.verticalCenter
         }
-        // fill the panel thickness; capped in very thick panels; on
-        // vertical panels the width is fixed, so fit it too (H2 nit)
-        height: Math.min(parent.height, parent.width, Kirigami.Units.gridUnit * 3)
+        // fill the panel thickness; capped in very thick panels. On
+        // vertical panels the width is fixed by the panel, so fit it too;
+        // in horizontal panels parent.width derives from this item's own
+        // width (J2: no feedback loop — only read parent.width when
+        // vertical)
+        height: compact.vertical
+            ? Math.min(parent.width, Kirigami.Units.gridUnit * 3)
+            : Math.min(parent.height, Kirigami.Units.gridUnit * 3)
         width: height
         opacity: compact.connected ? 1 : 0.35
     }
@@ -122,7 +127,10 @@ Item {
         + (compact.showDistance && compact.lines <= 1 ? singleLine.implicitWidth : 0)
         + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
     Layout.preferredWidth: Layout.minimumWidth
-    Layout.minimumHeight: Kirigami.Units.gridUnit * 2
+    // J2: no minimumHeight — a horizontal panel's thickness is the
+    // user's choice, and forcing 2 gridUnit would hide the thin-panel
+    // distance line (H2). Vertical panels get their height from the icon
+    // size instead.
 
     // touchpad gestures send many small angleDelta events: accumulate and
     // step once per ±120 (REVIEW round-2 A6)

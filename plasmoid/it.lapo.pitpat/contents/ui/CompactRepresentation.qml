@@ -8,6 +8,7 @@ import org.kde.kirigami as Kirigami
 /**
  * Compact panel item (§10): the panel thickness picks the level of detail
  * while a session is open (including paused):
+ *   < 1 line → icon + `1.23 km` only
  *   1 line   → `1.23 km · 2.5 km/h`
  *   2 lines  → distance (larger) / speed
  *   3+ lines → distance / speed / session time (mm:ss)
@@ -38,6 +39,9 @@ Item {
         return Math.floor(height / oneLine);
     }
 
+    // H2: a thin panel still shows the distance — the user asked for it
+    readonly property bool showDistance: onMove && !vertical && lines >= 0
+
     Kirigami.Icon {
         id: icon
         source: "run-build"
@@ -45,18 +49,21 @@ Item {
             left: parent.left
             verticalCenter: parent.verticalCenter
         }
-        // fill the panel thickness; capped in very thick panels
-        height: Math.min(parent.height, Kirigami.Units.gridUnit * 3)
+        // fill the panel thickness; capped in very thick panels; on
+        // vertical panels the width is fixed, so fit it too (H2 nit)
+        height: Math.min(parent.height, parent.width, Kirigami.Units.gridUnit * 3)
         width: height
         opacity: compact.connected ? 1 : 0.35
     }
 
     Text {
         id: singleLine
-        // one-line mode: `1.23 km · 2.5 km/h`
-        visible: compact.onMove && compact.lines === 1
-        text: compact.sessionKm.toFixed(2) + " km · "
-            + root.snap.speed_kmh.toFixed(1) + " km/h"
+        // thin panel: distance only; one-line mode: `1.23 km · 2.5 km/h`
+        visible: compact.showDistance && compact.lines <= 1
+        text: compact.lines === 0
+            ? compact.sessionKm.toFixed(2) + " km"
+            : compact.sessionKm.toFixed(2) + " km · "
+                + root.snap.speed_kmh.toFixed(1) + " km/h"
         color: Kirigami.Theme.textColor
         font.pixelSize: icon.height / 2.4
         anchors {
@@ -111,6 +118,7 @@ Item {
     // width follows the widest visible line plus the icon (G1: sized from
     // content, not anchored to the parent, so nothing is clipped)
     Layout.minimumWidth: icon.width + Kirigami.Units.smallSpacing
+        + (compact.showDistance ? distanceLine.implicitWidth : 0)
         + (compact.onMove && compact.lines === 1 ? singleLine.implicitWidth : 0)
         + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
     Layout.preferredWidth: Layout.minimumWidth

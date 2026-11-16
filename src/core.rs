@@ -180,6 +180,8 @@ pub const PERSIST_S: u64 = 60;
 pub const SETTLE_SUPPRESS_S: u64 = 10;
 /// F1/G2: at most this many SetSpeed corrections per start.
 pub const MAX_START_CORRECT: u8 = 3;
+/// H1: seconds between corrective SetSpeed sends.
+pub const START_RETRY_S: u64 = 2;
 /// §4.5a: a wake must have the link up within this budget, or the queued
 /// command is dropped and the daemon goes back to sleep.
 pub const WAKE_BUDGET_S: u64 = 30;
@@ -217,6 +219,8 @@ pub struct Core {
     pending_start_speed: Option<f64>,
     settle_suppress_until: Option<tokio::time::Instant>,
     start_correct_tries: u8,
+    /// H1: when the last corrective SetSpeed went out.
+    last_start_correct: Option<tokio::time::Instant>,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -264,6 +268,7 @@ impl Core {
             pending_start_speed: None,
             settle_suppress_until: None,
             start_correct_tries: 0,
+            last_start_correct: None,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -426,9 +431,7 @@ impl Core {
                 }
                 self.idle_since = Some(tokio::time::Instant::now());
                 // user override: the start-speed correction is cancelled
-                self.pending_start_speed = None;
-                self.start_correct_tries = 0;
-                self.settle_suppress_until = None;
+                self.cancel_start_correction();
                 self.forget_settle();
                 self.queue_back(WireCmd::Pause)
             }
@@ -452,9 +455,7 @@ impl Core {
                 // updates the remembered target — no wake, no beep
                 self.idle_since = Some(tokio::time::Instant::now());
                 // user override
-                self.pending_start_speed = None;
-                self.start_correct_tries = 0;
-                self.settle_suppress_until = None;
+                self.cancel_start_correction();
                 let v = self.clamp(v);
                 self.target_speed_kmh = v;
                 self.forget_settle();
@@ -616,9 +617,7 @@ impl Core {
         }
         if eq_speed(st.target_speed_kmh, v) {
             // the belt got there: normal remote pickup resumes
-            self.pending_start_speed = None;
-            self.start_correct_tries = 0;
-            self.settle_suppress_until = None;
+            self.cancel_start_correction();
             return;
         }
         if self
@@ -628,26 +627,39 @@ impl Core {
             // give up: log so the behaviour is visible
             tracing::warn!(
                 want = v,
+                sends = self.start_correct_tries,
                 "belt never reported the requested start speed; giving up"
             );
-            self.pending_start_speed = None;
-            self.start_correct_tries = 0;
-            self.settle_suppress_until = None;
+            self.cancel_start_correction();
             return;
         }
-        // re-queue every other running packet, at most MAX times
-        if self.start_correct_tries < MAX_START_CORRECT {
+        // H1: count SENDS and time them — the previous packet-counted
+        // version fired twice within the first second (one packet = one
+        // try) and then stayed silent for the rest of the window
+        let due = self.last_start_correct.is_none()
+            || tokio::time::Instant::now()
+                >= self.last_start_correct.expect("checked above")
+                    + Duration::from_secs(START_RETRY_S);
+        if due && self.start_correct_tries < MAX_START_CORRECT {
             self.start_correct_tries += 1;
-            if self.start_correct_tries % 2 == 1 {
-                tracing::info!(
-                    target = st.target_speed_kmh,
-                    want = v,
-                    try = self.start_correct_tries,
-                    "belt targets its own default; queueing SetSpeed"
-                );
-                let _ = self.queue_set_speed(v);
-            }
+            self.last_start_correct = Some(tokio::time::Instant::now());
+            tracing::info!(
+                target = st.target_speed_kmh,
+                want = v,
+                send = self.start_correct_tries,
+                "belt targets its own default; queueing SetSpeed"
+            );
+            let _ = self.queue_set_speed(v);
         }
+    }
+
+    /// F1/G2: drop the pending start-speed correction (user override,
+    /// belt landed, or give-up).
+    fn cancel_start_correction(&mut self) {
+        self.pending_start_speed = None;
+        self.start_correct_tries = 0;
+        self.last_start_correct = None;
+        self.settle_suppress_until = None;
     }
 
     /// §4.5a: the first packet of a wake-from-sleep connection may show a
@@ -1715,15 +1727,77 @@ mod tests {
             "belt ignored the start speed; SetSpeed queued"
         );
         assert!((c.target_speed_kmh - 2.5).abs() < 1e-9, "target stays 2.5");
+        // drain: send #1 leaves the queue (the pump does this per
+        // notification)
+        let sent = c.next_reply();
+        assert_eq!(&sent[6..8], &2500u16.to_be_bytes());
         // while suppressed, settled 1.0 reports do not sync either
         c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.5));
         assert!((c.target_speed_kmh - 2.5).abs() < 1e-9);
+        // H1: within the 2 s retry gap NO second SetSpeed is queued —
+        // sends are timed, not packet-counted
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.5));
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.5));
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.5));
+        assert_eq!(c.start_correct_tries, 1, "one send so far");
+        assert!(
+            !c.queue.iter().any(|q| matches!(q, WireCmd::SetSpeed(_))),
+            "no second SetSpeed inside the retry gap"
+        );
         // once the belt reports 2.5 the sync is allowed again
         c.on_packet(&st_target(p::BeltState::Running, 2.5, 2.5, 0, 0, 0, 1.0));
         c.on_packet(&st_target(p::BeltState::Running, 2.5, 2.5, 0, 0, 0, 1.5));
         assert!(
             (c.target_speed_kmh - 2.5).abs() < 1e-9,
             "still 2.5, as asked"
+        );
+        assert!(c.pending_start_speed.is_none(), "correction ended");
+    }
+
+    /// H1: after the retry gap a second SetSpeed goes out; after
+    /// MAX_START_CORRECT sends the correction gives up (warn path) and
+    /// the suppression ends, so the settle-sync picks the belt's speed up.
+    #[tokio::test(start_paused = true)]
+    async fn start_speed_retry_and_giveup() {
+        let dir = tmpdir("startretry");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        c.queue_api(ApiCmd::SpeedAbs(2.5)).ok();
+        c.queue_api(ApiCmd::Start(None)).ok();
+        c.next_reply(); // start command out
+        // first running packet: send #1
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.0));
+        assert_eq!(c.start_correct_tries, 1);
+        // still inside the retry gap: no second send
+        tokio::time::advance(Duration::from_secs(1)).await;
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 1.0));
+        assert_eq!(c.start_correct_tries, 1);
+        // past the gap: send #2
+        tokio::time::advance(Duration::from_secs(2)).await;
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 3.0));
+        assert_eq!(c.start_correct_tries, 2);
+        // past the gap again: send #3 (the last, at ~5 s < the window)
+        tokio::time::advance(Duration::from_secs(2)).await;
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 5.0));
+        assert_eq!(c.start_correct_tries, 3, "MAX_START_CORRECT reached");
+        // drain: send #3 leaves the queue
+        let sent3 = c.next_reply();
+        assert_eq!(&sent3[6..8], &2500u16.to_be_bytes());
+        // drive past the suppression window entirely: the give-up fires
+        tokio::time::advance(Duration::from_secs(SETTLE_SUPPRESS_S)).await;
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 15.0));
+        assert!(c.pending_start_speed.is_none(), "gave up after MAX sends");
+        assert!(c.settle_suppress_until.is_none(), "suppression ended");
+        // the settle-sync picks the belt's 1.0 up as before (§3.6): the
+        // settle window refills from scratch after the suppression ended
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 16.0));
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 16.5));
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 17.0));
+        assert!(
+            (c.target_speed_kmh - 1.0).abs() < 1e-9,
+            "the default settles in after the give-up"
         );
     }
 

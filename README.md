@@ -5,15 +5,41 @@ and export its data as Prometheus metrics — most importantly **the distance wa
 both for the current session and as a lifetime counter.
 
 Protocol reverse-engineering credit: the [PitPat-WebBT](https://github.com/KeiranY/PitPat-WebBT)
-project (`treadmill.js`); everything needed is documented in [`SPEC.md`](SPEC.md) §3.
+project (`treadmill.js`). Writes must be ATT **Write Requests** (`writeValue` with response) —
+the treadmill silently ignores Write Commands.
 
 ## Components
 
-- `pitpat daemon` — single process owning the BLE connection, reconnecting forever, with an
-  HTTP/JSON control API and Prometheus metrics on `127.0.0.1:9839` (see `--simulate` for
-  hardware-free development/testing).
+- `pitpat daemon` — single process owning the BLE connection on demand, with an HTTP/JSON
+  control API and Prometheus metrics on `127.0.0.1:9839` (see `--simulate` for hardware-free
+  development/testing).
 - Plasma 6 widget (`it.lapo.pitpat`) for the panel with popup controls.
 - `pitpat` CLI for scripting and KDE global shortcuts (see below).
+
+## Idle sleep (on-demand connection)
+
+The treadmill beeps on every BLE connect and keeps its LCD lit, so the daemon does not hold the
+link permanently. After `--idle-timeout` seconds (default 300; `0` = always connected) stopped
+with no control call it disconnects and sleeps: no reconnects, no beeps. Any control call wakes
+it — `pitpat start/pause/stop/toggle` or an explicit `pitpat connect` / `POST /api/connect`.
+Speed changes (absolute, delta, preset) while asleep only update the remembered target and do
+not wake it (a stray mouse-wheel won't beep). `pitpat sleep` / `POST /api/sleep` drops the link
+early.
+
+Notes:
+
+- Writes to the treadmill need BlueZ's experimental `ConnectDevice` so a wake never has to scan
+  (some USB dongles crash under overlapping scans). The NixOS module sets
+  `hardware.bluetooth.settings.General.Experimental = true` by default; on other setups add:
+
+  ```ini
+  [General]
+  Experimental = true
+  ```
+
+- A walk started **and** finished with the physical remote while the daemon sleeps is not
+  recorded; a walk in progress when the daemon wakes is credited once (capped at 20 km /
+  30 000 steps).
 
 ## Quick start (simulator)
 
@@ -77,6 +103,8 @@ pitpat toggle          # running → pause; otherwise start
 pitpat stop
 pitpat speed 3.2 | +0.1 | -0.1 | preset 2
 pitpat target [--distance 3km|2500m] [--time 30m|1h15m] | pitpat target clear
+pitpat connect              # wake the daemon (bring the BLE link up)
+pitpat sleep                # drop the BLE link now
 pitpat sessions [-n 10]
 ```
 

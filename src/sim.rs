@@ -4,7 +4,8 @@ use crate::link::LinkError;
 use crate::protocol::{BeltState, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 /// Simulated treadmill (§4.7): emits a real 31-byte notification every
 /// 500 ms (so the decoder path is exercised), reacts to commands like a
@@ -12,13 +13,20 @@ use std::time::{Duration, Instant};
 /// counters advance from the speed; stop resets counters), and can be
 /// told to drop the link (daemon wires SIGUSR1 into `request_drop`) to
 /// exercise the reconnect logic.
+#[derive(Clone)]
 pub struct SimLink {
     weight_kg: u8,
     drop: Arc<AtomicBool>,
+    /// Shared across connects: the treadmill persists between BLE
+    /// sessions (§4.5a tests need a belt started by the "remote" while
+    /// no one is connected).
+    belt: Arc<std::sync::Mutex<SimBelt>>,
 }
 
 pub struct SimConn {
-    belt: SimBelt,
+    /// The simulated treadmill's fixed address (§6.2 device view).
+    pub address: String,
+    belt: Arc<std::sync::Mutex<SimBelt>>,
     weight_kg: u8,
     drop: Arc<AtomicBool>,
     last_tick: Option<Instant>,
@@ -39,6 +47,9 @@ struct SimBelt {
     kcal_f: f64,
     duration_s: f64,
     starting_ends_at: Option<Instant>,
+    /// §4.5a: when the remote started the belt with nobody connected,
+    /// counters catch up to real elapsed time on the first tick.
+    remote_running_since: Option<Instant>,
     pending: Option<Command>,
     commanded_speed: f64,
 }
@@ -48,7 +59,46 @@ impl SimLink {
         Self {
             weight_kg,
             drop: Arc::new(AtomicBool::new(false)),
+            belt: Arc::new(std::sync::Mutex::new(SimBelt::new())),
         }
+    }
+
+    /// §4.5a hook (tests + hand-testing): the belt is started with the
+    /// physical remote while the daemon is asleep/disconnected. Counters
+    /// advance on the next ticks of whichever connection exists.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn remote_start(&self, speed_kmh: f64) {
+        self.remote_start_with(speed_kmh, 0, 0, 0, 0.0);
+    }
+
+    /// §4.5a hook with explicit counters: a remote-started walk has been
+    /// going for a while, so the belt's offline counters are nonzero.
+    /// `distance_m`/`steps`/`kcal`/`duration_s` are the values the next
+    /// connection will report immediately.
+    #[allow(clippy::too_many_arguments)]
+    pub fn remote_start_with(
+        &self,
+        speed_kmh: f64,
+        distance_m: u32,
+        steps: u32,
+        kcal: u16,
+        duration_s: f64,
+    ) {
+        let mut belt = self.belt.lock().expect("sim belt");
+        belt.distance_m = distance_m;
+        belt.distance_f = distance_m as f64;
+        belt.steps = steps;
+        belt.steps_f = steps as f64;
+        belt.kcal = kcal;
+        belt.kcal_f = kcal as f64;
+        belt.duration_s = duration_s;
+        belt.state = BeltState::Running;
+        belt.commanded_speed = speed_kmh;
+        belt.target = speed_kmh;
+        belt.speed = speed_kmh;
+        belt.starting_ends_at = None;
+        belt.pending = None;
+        belt.remote_running_since = Some(Instant::now());
     }
 
     /// The shared drop flag so a signal task can flip it from elsewhere.
@@ -60,7 +110,8 @@ impl SimLink {
         // a fresh connection revives the link (SIGUSR1 was just a probe)
         self.drop.store(false, Ordering::Relaxed);
         Ok(SimConn {
-            belt: SimBelt::new(),
+            address: "00:11:22:33:44:55".to_string(),
+            belt: self.belt.clone(),
             weight_kg: self.weight_kg,
             drop: self.drop.clone(),
             last_tick: None,
@@ -82,6 +133,7 @@ impl SimBelt {
             kcal_f: 0.0,
             duration_s: 0.0,
             starting_ends_at: None,
+            remote_running_since: None,
             pending: None,
             commanded_speed: 1.0,
         }
@@ -92,7 +144,8 @@ impl SimBelt {
             Command::Start => {
                 self.target = self.commanded_speed;
                 if self.state != BeltState::Running && self.state != BeltState::Starting {
-                    self.starting_ends_at = Some(Instant::now() + Duration::from_secs(3));
+                    self.starting_ends_at =
+                        Some(tokio::time::Instant::now() + Duration::from_secs(3));
                     self.state = BeltState::Starting;
                     self.speed = 0.0;
                 }
@@ -127,7 +180,11 @@ impl SimBelt {
         let dt_s = dt.as_secs_f64();
 
         match self.state {
-            BeltState::Starting if self.starting_ends_at.is_some_and(|t| Instant::now() >= t) => {
+            BeltState::Starting
+                if self
+                    .starting_ends_at
+                    .is_some_and(|t| tokio::time::Instant::now() >= t) =>
+            {
                 self.state = BeltState::Running;
                 self.speed = 0.0;
             }
@@ -189,6 +246,10 @@ fn parse_command(pkt: &[u8]) -> Option<(Command, f64)> {
 pub const NOTIFY_PERIOD: Duration = Duration::from_millis(500);
 
 impl SimConn {
+    /// Drop the link explicitly: the simulator has no LE link, but the
+    /// flag is armed again so a reconnect starts fresh.
+    pub async fn disconnect(&mut self) {}
+
     pub async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
         tokio::time::sleep(NOTIFY_PERIOD).await;
         if self.drop.load(Ordering::Relaxed) {
@@ -203,11 +264,29 @@ impl SimConn {
             .replace(tick)
             .map_or(NOTIFY_PERIOD, |t| tick.duration_since(t))
             .min(NOTIFY_PERIOD);
-        let (state, dist, steps, kcal, dur) = self.belt.tick(dt, self.weight_kg);
-        Ok(
-            crate::protocol::encode_status(state, false, self.belt.speed, dist, steps, kcal, dur)
-                .to_vec(),
-        )
+        let (state, dist, steps, kcal, dur) = {
+            let mut belt = self.belt.lock().expect("sim belt");
+            // a remote-started belt kept counting while we slept (§4.5a)
+            if let Some(since) = belt.remote_running_since.take() {
+                if belt.state == BeltState::Running {
+                    let offline = tick.duration_since(since).as_secs_f64().min(3600.0);
+                    let metres = belt.speed * offline * 1000.0 / 3600.0;
+                    belt.distance_f += metres;
+                    belt.distance_m = belt.distance_f as u32;
+                    belt.steps_f += metres / 0.7;
+                    belt.steps = belt.steps_f as u32;
+                    belt.kcal_f += 0.5 * self.weight_kg as f64 * metres / 1000.0;
+                    belt.kcal = belt.kcal_f as u16;
+                    belt.duration_s += offline;
+                }
+            }
+            belt.tick(dt, self.weight_kg)
+        };
+        let speed = {
+            let belt = self.belt.lock().expect("sim belt");
+            belt.speed
+        };
+        Ok(crate::protocol::encode_status(state, false, speed, dist, steps, kcal, dur).to_vec())
     }
 
     pub async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
@@ -215,8 +294,9 @@ impl SimConn {
             return Ok(()); // heartbeat: nothing to apply
         }
         if let Some((cmd, speed)) = parse_command(pkt) {
-            self.belt.commanded_speed = speed;
-            self.belt.pending = Some(cmd);
+            let mut belt = self.belt.lock().expect("sim belt");
+            belt.commanded_speed = speed;
+            belt.pending = Some(cmd);
         }
         Ok(())
     }
@@ -228,7 +308,7 @@ mod tests {
 
     /// Queue a start with 3.0 km/h on a raw connection and check that the
     /// belt reaches `running` and the ramp ends at the target speed.
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(start_paused = true)]
     async fn start_rampes_to_target() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -262,7 +342,7 @@ mod tests {
         panic!("speed never settled at target");
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(start_paused = true)]
     async fn stop_res_counters() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -289,7 +369,50 @@ mod tests {
         assert_eq!(st.kcal, 0);
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    /// §4.5a: remote_start makes the NEXT connection report a moving
+    /// belt with growing counters (the crediting scenario). Counters
+    /// must not burst either: per-notification distance stays under
+    /// 1 m at low speed (the old std::time tick bug redeemed lost time
+    /// in one packet).
+    #[tokio::test(start_paused = true)]
+    async fn remote_start_survives_reconnect() {
+        let link = SimLink::new(80);
+        link.remote_start(1.5);
+        let mut c = link.connect().await.unwrap();
+        let pkt = c.recv_notification().await.unwrap();
+        let st = crate::protocol::decode_status(&pkt).unwrap();
+        assert_eq!(st.belt_state(), BeltState::Running);
+        assert!((st.speed_mps * 3.6 - 1.5).abs() < 1e-9);
+        // ~0.2 m per 500 ms tick at 1.5 km/h: the u32 counters only move
+        // after the fractional accumulator crosses whole metres
+        let mut last = st.distance_m;
+        for _ in 0..12 {
+            let next = c.recv_notification().await.unwrap();
+            let st2 = crate::protocol::decode_status(&next).unwrap();
+            assert!(st2.distance_m >= last, "counters never go back");
+            last = st2.distance_m;
+        }
+        assert!(last > 0, "counters advance over ~3 s of walking");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn distance_grows_linearly() {
+        let link = SimLink::new(80);
+        let mut c = link.connect().await.unwrap();
+        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
+            .await
+            .unwrap();
+        let mut prev = 0u32;
+        for _ in 0..10 {
+            let pkt = c.recv_notification().await.unwrap();
+            let st = crate::protocol::decode_status(&pkt).unwrap();
+            let d = st.distance_m.saturating_sub(prev);
+            prev = st.distance_m;
+            assert!(d <= 1, "distance burst: +{d} m in one packet");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn drop_flag_turns_notifications() {
         let link = SimLink::new(80);
         let mut c = link.connect().await.unwrap();
@@ -304,31 +427,5 @@ mod tests {
                 .unwrap(),
             Err(LinkError::Dead(_))
         ));
-    }
-}
-
-#[cfg(test)]
-mod dbg {
-    use super::*;
-    #[tokio::test(flavor = "current_thread")]
-    async fn distance_grows_linearly() {
-        let link = SimLink::new(80);
-        let mut c = link.connect().await.unwrap();
-        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
-            .await
-            .unwrap();
-        let mut prev = 0u32;
-        for i in 0..8 {
-            let pkt = c.recv_notification().await.unwrap();
-            let st = crate::protocol::decode_status(&pkt).unwrap();
-            let d = st.distance_m.saturating_sub(prev);
-            prev = st.distance_m;
-            eprintln!(
-                "pkt {i}: dist={} delta={d} state={:?}",
-                st.distance_m,
-                st.belt_state()
-            );
-        }
-        assert!(prev <= 5, "delta too big: {prev}");
     }
 }

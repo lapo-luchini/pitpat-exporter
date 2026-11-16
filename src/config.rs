@@ -60,6 +60,12 @@ pub struct Config {
     #[arg(long, env = "PITPAT_SIMULATE")]
     pub simulate: bool,
 
+    /// Disconnect after this many seconds stopped with no API activity
+    /// and sleep (no reconnect) until a control call wakes the daemon;
+    /// 0 keeps the old always-connected behaviour (§4.5a).
+    #[arg(long, env = "PITPAT_IDLE_TIMEOUT", default_value_t = 300)]
+    pub idle_timeout: u64,
+
     /// tracing filter (e.g. info, debug, pitpat=debug,bluer=warn).
     #[arg(long, env = "PITPAT_LOG", default_value = "info")]
     pub log: String,
@@ -116,6 +122,7 @@ pub struct DaemonCfg {
     pub max_speed: f64,
     pub default_speed: f64,
     pub presets: Vec<f64>,
+    pub idle_timeout: u64,
 }
 
 impl From<&Config> for DaemonCfg {
@@ -127,6 +134,7 @@ impl From<&Config> for DaemonCfg {
             max_speed: c.max_speed,
             default_speed: c.default_speed,
             presets: c.presets.clone(),
+            idle_timeout: c.idle_timeout,
         }
     }
 }

@@ -20,6 +20,7 @@ let
       concatMapStringsSep "," toString cfg.presets
     }"
     ++ optional cfg.simulate "--simulate"
+    ++ [ "--idle-timeout ${toString cfg.idleTimeout}" ]
     ++ [ "--listen ${escapeShellArg cfg.listen}" ]
     ++ optionals (cfg.tokenFile != null) [
       # carried by LoadCredential into the service's credential directory
@@ -98,6 +99,16 @@ in
       description = "Run against the built-in simulator instead of real Bluetooth.";
     };
 
+    idleTimeout = mkOption {
+      type = types.ints.u32;
+      default = 300;
+      description = ''
+        Disconnect after this many seconds stopped with no API activity and
+        sleep until a control call wakes the daemon; 0 keeps the link up
+        permanently (§4.5a).
+      '';
+    };
+
     extraArgs = mkOption {
       type = types.listOf types.str;
       default = [ ];
@@ -121,6 +132,11 @@ in
   # ---------------------------------------------------------------- options
   config = mkIf cfg.enable {
     hardware.bluetooth.enable = true;
+    # The wake path uses BlueZ's ConnectDevice (D-Bus Adapter1.ConnectDevice)
+    # so a pinned treadmill is reached without LE scanning — some USB
+    # dongles reset when scans overlap. ConnectDevice is experimental and
+    # only present with this setting (REVIEW round-6 D1).
+    hardware.bluetooth.settings.General.Experimental = mkDefault true;
 
 
     # a non-loopback bind without a token would allow anyone reachable to

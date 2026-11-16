@@ -14,7 +14,14 @@ struct StateLabel {
 }
 
 /// All 5 states, always present (§7).
-const STATES: [&str; 5] = ["disconnected", "stopped", "starting", "running", "paused"];
+const STATES: [&str; 6] = [
+    "disconnected",
+    "sleeping",
+    "stopped",
+    "starting",
+    "running",
+    "paused",
+];
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, prometheus_client::encoding::EncodeLabelSet)]
 struct BuildInfo {

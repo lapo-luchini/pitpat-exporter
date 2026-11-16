@@ -52,6 +52,16 @@ enum Cmd {
         #[command(flatten)]
         client: cli::Client,
     },
+    /// §4.5a: bring the BLE link up without starting the belt.
+    Connect {
+        #[command(flatten)]
+        client: cli::Client,
+    },
+    /// §4.5a: drop the BLE link now (409 while moving).
+    Sleep {
+        #[command(flatten)]
+        client: cli::Client,
+    },
     /// running → pause; otherwise start.
     Toggle {
         #[command(flatten)]
@@ -99,6 +109,8 @@ fn main() -> ExitCode {
         Cmd::Status { client, json } => cli::exit_for(cli::status(&cli::Api::new(&client), json)),
         Cmd::Start { client, speed } => cli::exit_for(cli::start(&cli::Api::new(&client), speed)),
         Cmd::Pause { client } => cli::exit_for(cli::pause(&cli::Api::new(&client))),
+        Cmd::Connect { client } => cli::exit_for(cli::connect(&cli::Api::new(&client))),
+        Cmd::Sleep { client } => cli::exit_for(cli::sleep(&cli::Api::new(&client))),
         Cmd::Toggle { client } => cli::exit_for(cli::toggle(&cli::Api::new(&client))),
         Cmd::Stop { client } => cli::exit_for(cli::stop(&cli::Api::new(&client))),
         Cmd::Speed { client, value } => cli::exit_for(cli::speed(&cli::Api::new(&client), &value)),
@@ -244,7 +256,7 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
 
     // signal bookkeeping (§4.6): TERM/INT → Ctrl::Shutdown; USR1 sets the
     // simulators's drop flag (§4.7). Everything flows through one task.
-    let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<core::Ctrl>(4);
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<core::Ctrl>(4);
     let sim_flag = if cfg.simulate {
         tracing::info!("simulator link enabled (--simulate)");
         Some(sim::SimLink::new(cfg.weight_kg))
@@ -256,11 +268,15 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         sim_flag.as_ref().map(|s| s.drop_flag()),
     ));
 
-    let mut link = match sim_flag {
+    let link = match sim_flag {
         Some(s) => link::Link::Sim(s),
-        None => link::Link::Ble(ble::BleLink::new(cfg.adapter.clone(), cfg.address.clone())),
+        None => link::Link::Ble(ble::BleLink::new(
+            cfg.adapter.clone(),
+            cfg.address.clone(),
+            Some(cfg.state_dir.clone()),
+        )),
     };
-    let mut core = core::Core::new(
+    let core = core::Core::new(
         config::DaemonCfg::from(&cfg),
         totals,
         metrics.clone(),
@@ -269,69 +285,13 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
         cfg.state_dir.clone(),
     );
 
-    // reconnect loop: exponential backoff 1 → 2 → … 30 s, forever (§4.1)
-    let mut backoff_s = 1u64;
-    loop {
-        core.begin_connection(None);
-        // a shutdown signal must not wait for the whole scan/connect
-        // attempt (REVIEW item 6)
-        let connect_outcome = {
-            let connect = link.connect();
-            futures::pin_mut!(connect);
-            tokio::select! {
-                outcome = &mut connect => Some(outcome),
-                c = ctrl_rx.recv() => match c {
-                    Some(core::Ctrl::Shutdown) | None => None,
-                },
-            }
-        };
-        let mut conn = match connect_outcome {
-            Some(Ok(conn)) => {
-                let addr = conn.address();
-                core.begin_connection(Some(addr.clone()));
-                tracing::info!(address = %addr, "link established");
-                backoff_s = 1;
-                conn
-            }
-            Some(Err(err)) => {
-                tracing::warn!(?err, "connection failed");
-                core.on_disconnect(core::DeadReason::Link);
-                core.metrics.reconnects_total.inc();
-                if sleep_or_shutdown(backoff_s, &mut ctrl_rx).await {
-                    core.on_disconnect(core::DeadReason::Shutdown);
-                    break;
-                }
-                backoff_s = (backoff_s * 2).min(30);
-                continue;
-            }
-            None => {
-                // shutdown while connecting
-                core.on_disconnect(core::DeadReason::Shutdown);
-                break;
-            }
-        };
-        let reason = core::pump(&mut core, &mut conn, &mut ctrl_rx).await;
-        if reason == core::DeadReason::Shutdown {
-            shutdown_flow(&mut core, &mut conn).await;
-            break;
-        }
-        tracing::warn!(?reason, address = %conn.address(), "link lost, reconnecting");
-        // drop the LE link even when the notify stream died: BlueZ would
-        // keep the treadmill locked against its phone app otherwise
-        // (REVIEW item 6)
-        conn.disconnect().await;
-        core.on_disconnect(reason);
-        core.metrics.reconnects_total.inc();
-        if sleep_or_shutdown(backoff_s, &mut ctrl_rx).await {
-            core.on_disconnect(core::DeadReason::Shutdown);
-            break;
-        }
-        backoff_s = (backoff_s * 2).min(30);
-    }
+    // §4.5a + §4.1: the whole link policy (sleep/wake, reconnect
+    // backoff, link-loss handling) lives in the supervisor, tested
+    // against scripted links (REVIEW round-6 D2/D3)
+    core::supervise(core, link, ctrl_rx).await;
 
     server.abort();
     bridge.abort();
-    core.persist();
     ExitCode::SUCCESS
 }
 
@@ -368,59 +328,4 @@ async fn signal_task(
     }
     tracing::info!("shutdown signal received");
     let _ = tx.send(core::Ctrl::Shutdown).await;
-}
-
-/// On SIGTERM while the belt is moving (§4.6): send stop, wait up to 3 s
-/// for the treadmill to confirm via the notification cycle, then close
-/// the session (end_reason shutdown), persist totals, disconnect.
-async fn shutdown_flow(core: &mut core::Core, conn: &mut link::Conn) {
-    if core.moving() {
-        tracing::info!("stopping the belt before exit");
-        core.begin_shutdown();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while core.state != core::State::Stopped {
-            if std::time::Instant::now() >= deadline {
-                tracing::warn!("belt not confirmed stopped within 3 s, exiting anyway");
-                break;
-            }
-            if let Ok(Ok(raw)) = tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                conn.recv_notification(),
-            )
-            .await
-            {
-                core.on_packet(&raw);
-                core.drain_api_cmds();
-                write_reply(core, conn).await;
-            }
-        }
-    }
-    core.on_disconnect(core::DeadReason::Shutdown);
-    core.persist();
-    // BlueZ keeps the LE link up after the notify stream dies unless the
-    // Device.Disconnect goes out explicitly: the phone app would stay
-    // locked out (REVIEW round-2 A4)
-    conn.disconnect().await;
-}
-
-/// Backoff sleep that wakes immediately on a shutdown signal; returns
-/// true when shutdown was requested.
-async fn sleep_or_shutdown(
-    secs: u64,
-    ctrl_rx: &mut tokio::sync::mpsc::Receiver<core::Ctrl>,
-) -> bool {
-    tokio::time::timeout(std::time::Duration::from_secs(secs), ctrl_rx.recv())
-        .await
-        .unwrap_or(None)
-        .is_some()
-}
-
-/// One reply packet per notification; shared with the shutdown flow.
-async fn write_reply(core: &mut core::Core, conn: &mut link::Conn) {
-    let pkt = core.next_reply();
-    if conn.write_packet(&pkt).await.is_ok() {
-        core.write_succeeded();
-    } else if pkt.as_slice() != protocol::HEARTBEAT {
-        core.write_failed(pkt);
-    }
 }

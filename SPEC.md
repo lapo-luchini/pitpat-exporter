@@ -120,6 +120,7 @@ All integers are **big-endian, unsigned**. Offsets are byte indices:
 | Field | Offset | Size | Meaning |
 |---|---|---|---|
 | current speed | 3 | u16 | speed × 1000 (km/h or mph, see unit flag) |
+| target speed | 5 | u16 | the treadmill's own target, × 1000, same unit |
 | distance | 7 | u32 | distance × 1000 (km or mi) → in km mode, **metres** |
 | steps | 14 | u32 | step count, current session |
 | calories | 18 | u16 | kcal, current session |
@@ -132,6 +133,13 @@ Flags byte:
 
 Normalise everything to SI internally: speed in m/s, distance in metres
 (imperial: `value × 1.609344`), duration in seconds (float).
+
+Hardware note (the 52-byte variant seen on real hardware, C4:A9:B8:…):
+the frame starts `68 34` and is 52 bytes long, but the field offsets
+above are unchanged and the values decoded correctly. Bytes 11–19
+(steps @14 and kcal @18) were all zero at ~1 km/h on this model; the
+tail carries what looks like a device serial. Don't guess extra
+offsets from short traces.
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
 
@@ -185,6 +193,11 @@ The reference implementation holds one pending packet and silently drops older o
   every set-speed command, and used by "start". When the treadmill reports *running*, sync
   `target_speed` to the reported speed once the belt has settled (i.e. ignore the ramp-up while
   starting) so that physical-remote changes are reflected.
+- Hardware quirk (F1): this model **ignores the speed field of the start command** and always
+  ramps to its own default (1.0). After a daemon-issued `Start(v)`, remember `v`; on the first
+  `running` packet, if the treadmill's target (@5) isn't `v`, queue `SetSpeed(v)` once, and
+  suppress the settle-sync until the belt reports `v` (at most ~10 s), so the remote pickup
+  doesn't erase the user's speed.
 
 ---
 
@@ -294,8 +307,10 @@ go out via the notification cycle), close the session, persist totals, disconnec
 ### 4.7 Simulator (`--simulate`)
 `SimLink` emits a notification every 500 ms. It reacts to the commands like a real treadmill:
 start → `starting` for 3 s → `running` with the speed ramping at 0.5 km/h per second to the
-target; pause/stop as expected; counters advance from the speed (steps ≈ distance / 0.7 m;
-kcal ≈ 0.5 × weight_kg × km); stop resets counters to 0. It encodes real 31-byte packets so that
+**belt's own default (1.0)** — like the hardware, it ignores the start command's speed field, so
+the daemon's corrective `SetSpeed` is exercised; pause/stop as expected; counters advance from
+the speed (steps ≈ distance / 0.7 m; kcal ≈ 0.5 × weight_kg × km); stop resets counters to 0.
+The status packets carry the treadmill's own target speed at offset 5. It encodes real 31-byte packets so that
 the decoder path is exercised too. It must also be able to simulate a disconnect
 (`SIGUSR1` → drop the link) to test reconnect logic by hand.
 

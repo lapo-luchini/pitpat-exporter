@@ -176,6 +176,8 @@ pub const QUEUE_CAP: usize = 8;
 pub const WATCHDOG_S: u64 = 10;
 /// Periodic totals.json flush while running (§4.4).
 pub const PERSIST_S: u64 = 60;
+/// F1: settle-sync suppression window after a daemon-issued start.
+pub const SETTLE_SUPPRESS_S: u64 = 10;
 /// §4.5a: a wake must have the link up within this budget, or the queued
 /// command is dropped and the daemon goes back to sleep.
 pub const WAKE_BUDGET_S: u64 = 30;
@@ -204,6 +206,14 @@ pub struct Core {
     /// describe a belt possibly started with the remote: credit its
     /// counters to the lifetime totals once.
     expect_late_credit: bool,
+    /// F1: this model ignores the speed field of the start command, so a
+    /// daemon-issued `Start(v)` is followed by a `SetSpeed(v)` on the
+    /// first running packet if the belt targets something else, and the
+    /// settle-sync (§3.6 remote pickup) is suppressed until the belt
+    /// reports `v` (at most SETTLE_SUPPRESS_S), so the user's speed
+    /// is not erased.
+    pending_start_speed: Option<f64>,
+    settle_suppress_until: Option<tokio::time::Instant>,
     imperial: bool,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
@@ -248,6 +258,8 @@ impl Core {
             wake_requested: false,
             sleep_requested: false,
             expect_late_credit: false,
+            pending_start_speed: None,
+            settle_suppress_until: None,
             imperial: false,
             speed_kmh: 0.0,
             target_speed_kmh,
@@ -397,6 +409,10 @@ impl Core {
                     // an explicit speed while moving means set-speed
                     self.queue_set_speed(speed)
                 } else {
+                    // F1: the belt ignores the start command's speed field
+                    // and ramps to its own default: remember the requested
+                    // speed and correct it on the first running packet
+                    self.pending_start_speed = Some(speed);
                     self.queue_back(WireCmd::Start(speed))
                 }
             }
@@ -528,6 +544,7 @@ impl Core {
         }
 
         let belt = State::from(st.belt_state());
+        self.correct_start_speed(&st, belt);
         self.late_credit(&st, belt);
         self.begin_session_if_needed(belt);
         if belt != State::Stopped {
@@ -554,6 +571,28 @@ impl Core {
         }
         self.check_targets();
         self.publish();
+    }
+
+    /// F1: on the first running packet after a daemon-issued start, make
+    /// the belt go to the requested speed (it ignored the start command's
+    /// speed field) and suppress the settle-sync until it gets there.
+    fn correct_start_speed(&mut self, st: &p::Status, belt: State) {
+        if let Some(v) = self.pending_start_speed.take() {
+            if belt == State::Running || belt == State::Starting {
+                self.settle_suppress_until =
+                    Some(tokio::time::Instant::now() + Duration::from_secs(SETTLE_SUPPRESS_S));
+                if !eq_speed(st.target_speed_kmh, v) {
+                    tracing::info!(
+                        target = st.target_speed_kmh,
+                        want = v,
+                        "belt ignored the start speed; queueing SetSpeed"
+                    );
+                    // full queue: the correction is dropped, the next
+                    // settle-sync will still pick the speed up later
+                    let _ = self.queue_set_speed(v);
+                }
+            }
+        }
     }
 
     /// §4.5a: the first packet of a wake-from-sleep connection may show a
@@ -654,6 +693,16 @@ impl Core {
     /// physical-remote change is picked up. Ramps never sync.
     fn sync_target_speed(&mut self, belt: State) {
         if belt != State::Running || !self.queue.is_empty() {
+            self.forget_settle();
+            return;
+        }
+        // F1: after a daemon-issued start, the belt ramps to its own
+        // default first; do not "sync" the user's requested speed away
+        // before it reports the requested target (or ~10 s pass)
+        if self
+            .settle_suppress_until
+            .is_some_and(|d| tokio::time::Instant::now() < d)
+        {
             self.forget_settle();
             return;
         }
@@ -1336,7 +1385,22 @@ mod tests {
     }
 
     fn st(belt: p::BeltState, speed: f64, dist: u32, steps: u32, kcal: u16, dur: f64) -> Vec<u8> {
-        p::encode_status(belt, false, speed, dist, steps, kcal, dur).to_vec()
+        st_target(belt, speed, speed, dist, steps, kcal, dur)
+    }
+
+    /// Variant with an explicit treadmill-side target speed (F1: the
+    /// belt ignores the start command's speed, so its own target can
+    /// differ from the daemon's).
+    fn st_target(
+        belt: p::BeltState,
+        speed: f64,
+        target: f64,
+        dist: u32,
+        steps: u32,
+        kcal: u16,
+        dur: f64,
+    ) -> Vec<u8> {
+        p::encode_status(belt, false, speed, target, dist, steps, kcal, dur).to_vec()
     }
 
     fn tmpdir(name: &str) -> std::path::PathBuf {
@@ -1557,6 +1621,46 @@ mod tests {
 
     // -------------------------------------------------------- targets
 
+    /// F1 regression: the belt ignores the start command's speed and
+    /// ramps to its own default. After a daemon-issued Start(v) the
+    /// daemon corrects with a SetSpeed(v) on the first running packet
+    /// and does NOT sync its target away from `v`.
+    #[test]
+    fn start_speed_is_reasserted() {
+        let dir = tmpdir("startspeed");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        // user picks 2.5 (e.g. a preset), then Start
+        c.queue_api(ApiCmd::SpeedAbs(2.5)).ok();
+        c.queue_api(ApiCmd::Start(None)).ok();
+        // the start command goes out first
+        assert_eq!(c.queue.front(), Some(&WireCmd::Start(2.5)));
+        let start_pkt = c.next_reply();
+        assert_eq!(&start_pkt[6..8], &2500u16.to_be_bytes());
+        // first running packet: the belt targets its own default 1.0
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.0));
+        // the corrective SetSpeed is queued once, and the daemon's target
+        // is NOT synced to 1.0
+        assert_eq!(
+            c.queue.front(),
+            Some(&WireCmd::SetSpeed(2.5)),
+            "belt ignored the start speed; SetSpeed queued"
+        );
+        assert!((c.target_speed_kmh - 2.5).abs() < 1e-9, "target stays 2.5");
+        // while suppressed, settled 1.0 reports do not sync either
+        c.on_packet(&st_target(p::BeltState::Running, 1.0, 1.0, 0, 0, 0, 0.5));
+        assert!((c.target_speed_kmh - 2.5).abs() < 1e-9);
+        // once the belt reports 2.5 the sync is allowed again
+        c.on_packet(&st_target(p::BeltState::Running, 2.5, 2.5, 0, 0, 0, 1.0));
+        c.on_packet(&st_target(p::BeltState::Running, 2.5, 2.5, 0, 0, 0, 1.5));
+        assert!(
+            (c.target_speed_kmh - 2.5).abs() < 1e-9,
+            "still 2.5, as asked"
+        );
+    }
+
     #[test]
     fn target_distance_autostop() {
         let dir = tmpdir("target");
@@ -1714,6 +1818,7 @@ mod tests {
         let pk = p::encode_status(
             p::BeltState::Running,
             true,
+            2.0 * 1.609344,
             2.0 * 1.609344,
             1609,
             100,
@@ -2397,7 +2502,15 @@ mod tests {
             &(2500u16).to_be_bytes(),
             "speed 2.5 km/h"
         );
-        assert_eq!(conn.written[2], p::HEARTBEAT.to_vec());
+        // F1: the first running packet showed the belt targeting its own
+        // default (2.0), so the corrective SetSpeed(2.5) followed
+        assert_eq!(
+            &conn.written[2][6..8],
+            &(2500u16).to_be_bytes(),
+            "corrective set-speed"
+        );
+        assert_eq!(conn.written[2][12], 0x04);
+        assert_eq!(conn.written[2][8], 0x05);
 
         core.on_disconnect(reason);
         assert!(core.snapshot().session.is_none());

@@ -58,6 +58,10 @@ pub fn encode_command(command: Command, speed_kmh: f64, weight_kg: u8, user_id: 
 pub struct Status {
     /// Belt speed in m/s.
     pub speed_mps: f64,
+    /// The treadmill's own target speed, km/h (u16 @5; REVIEW round-8 F1:
+    /// this model ignores the speed field of the start command, so this
+    /// is what it actually targets).
+    pub target_speed_kmh: f64,
     /// Session distance in metres.
     pub distance_m: u32,
     /// Session step count.
@@ -115,6 +119,12 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
     } else {
         be16(3) as f64 / 1000.0 / 3.6
     };
+    // the treadmill's own target speed, same unit and scaling
+    let target_speed_kmh = if imperial {
+        be16(5) as f64 / 1000.0 * 1.609344
+    } else {
+        be16(5) as f64 / 1000.0
+    };
     let distance_m = if imperial {
         (be32(7) as f64 / 1000.0 * MI_TO_M).round() as u32
     } else {
@@ -123,6 +133,7 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
 
     Some(Status {
         speed_mps,
+        target_speed_kmh,
         distance_m,
         steps: be32(14),
         kcal: be16(18),
@@ -132,10 +143,12 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
 }
 
 /// Build a 31-byte status notification (used by the simulator and tests).
+#[allow(clippy::too_many_arguments)]
 pub fn encode_status(
     belt: BeltState,
     imperial: bool,
     speed_kmh: f64,
+    target_speed_kmh: f64,
     distance_m: u32,
     steps: u32,
     kcal: u16,
@@ -156,6 +169,16 @@ pub fn encode_status(
     };
     p[3] = (speed >> 8) as u8;
     p[4] = speed as u8;
+    // the treadmill's own target speed, same unit and scaling (§3.2 @5)
+    let target = (if imperial {
+        target_speed_kmh / 1.609344 * 1000.0
+    } else {
+        target_speed_kmh * 1000.0
+    })
+    .round()
+    .clamp(0.0, 65535.0) as u16;
+    p[5] = (target >> 8) as u8;
+    p[6] = target as u8;
     p[7..11].copy_from_slice(&dist.to_be_bytes());
     p[14..18].copy_from_slice(&steps.to_be_bytes());
     p[18] = (kcal >> 8) as u8;
@@ -206,7 +229,7 @@ mod tests {
     }
 
     fn status(belt: BeltState, speed: f64, dist: u32, steps: u32, kcal: u16, dur: f64) -> Vec<u8> {
-        encode_status(belt, false, speed, dist, steps, kcal, dur).to_vec()
+        encode_status(belt, false, speed, speed, dist, steps, kcal, dur).to_vec()
     }
 
     #[test]
@@ -235,6 +258,7 @@ mod tests {
         let pkt = encode_status(
             BeltState::Running,
             true,
+            2.0 * 1.609344,
             2.0 * 1.609344,
             1609,
             840,

@@ -142,7 +142,10 @@ impl SimBelt {
     fn apply(&mut self, cmd: Command) {
         match cmd {
             Command::Start => {
-                self.target = self.commanded_speed;
+                // F1: the real treadmill ignores the start command's speed
+                // field and always ramps to its own default (min speed);
+                // the daemon corrects with a SetSpeed afterwards
+                self.target = 1.0;
                 if self.state != BeltState::Running && self.state != BeltState::Starting {
                     self.starting_ends_at =
                         Some(tokio::time::Instant::now() + Duration::from_secs(3));
@@ -286,7 +289,17 @@ impl SimConn {
             let belt = self.belt.lock().expect("sim belt");
             belt.speed
         };
-        Ok(crate::protocol::encode_status(state, false, speed, dist, steps, kcal, dur).to_vec())
+        Ok(crate::protocol::encode_status(
+            state,
+            false,
+            speed,
+            self.belt.lock().expect("sim belt").target,
+            dist,
+            steps,
+            kcal,
+            dur,
+        )
+        .to_vec())
     }
 
     pub async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
@@ -330,16 +343,52 @@ mod tests {
         }
         assert!(saw_running, "sim never reached running");
 
-        // Belt keeps ramping to 3.0 (0.5 km/h per second), so after a few
-        // more ticks the speed settles at the target.
+        // F1: the belt ignores the start speed and ramps to its own
+        // default (min speed 1.0), whatever the start command carried
         for _ in 0..40 {
             let pkt = c.recv_notification().await.unwrap();
             let st = crate::protocol::decode_status(&pkt).unwrap();
-            if (st.speed_mps * 3.6 - 3.0).abs() < 1e-9 {
-                return; // settled at the target speed
+            if (st.speed_mps * 3.6 - 1.0).abs() < 1e-9 {
+                assert!(
+                    (st.target_speed_kmh - 1.0).abs() < 1e-9,
+                    "target @5 should read 1.0"
+                );
+                return; // settled at the belt's own default
             }
         }
-        panic!("speed never settled at target");
+        panic!("speed never settled at the belt's default");
+    }
+
+    /// After the belt's default ramp a SetSpeed applies normally (that is
+    /// how the daemon corrects the start speed, F1).
+    #[tokio::test(start_paused = true)]
+    async fn set_speed_after_start_applies() {
+        let link = SimLink::new(80);
+        let mut c = link.connect().await.unwrap();
+        c.recv_notification().await.unwrap(); // stopped packet
+        // one packet per notification cycle: start first, then the
+        // daemon's corrective SetSpeed arrives with the next notification
+        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
+            .await
+            .unwrap();
+        c.recv_notification().await.unwrap(); // starting packet
+        c.write_packet(&crate::protocol::encode_command(
+            Command::SetSpeed,
+            3.0,
+            80,
+            1,
+        ))
+        .await
+        .unwrap();
+        for _ in 0..60 {
+            let pkt = c.recv_notification().await.unwrap();
+            let st = crate::protocol::decode_status(&pkt).unwrap();
+            if (st.speed_mps * 3.6 - 3.0).abs() < 1e-9 {
+                assert!((st.target_speed_kmh - 3.0).abs() < 1e-9, "target @5 = 3.0");
+                return;
+            }
+        }
+        panic!("SetSpeed after start never applied");
     }
 
     #[tokio::test(start_paused = true)]

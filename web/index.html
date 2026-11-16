@@ -74,6 +74,11 @@ function snap(s){
   $('spd').textContent=on?fmt(s.speed_kmh):'–';
   $('dist').textContent=ses?fmt(ses.distance_m):'–';
   $('time').textContent=ses?fmt(ses.duration_s/60):'–';
+  // F4: some models don't report steps/kcal — hide a zero counter once
+  // the session distance shows the walk is real
+  const hide0=v=>v===0&&ses&&ses.distance_m>50;
+  $('steps').style.visibility=(ses&&!hide0(ses.steps))?'':'hidden';
+  $('kcal').style.visibility=(ses&&!hide0(ses.kcal))?'':'hidden';
   $('steps').textContent=ses?ses.steps:'–';
   $('kcal').textContent=ses?ses.kcal:'–';
   $('tog').disabled=st==='disconnected'||st==='starting';
@@ -165,11 +170,13 @@ function presets(list){
 async function sessions(){
   try{
     const list=await(await fetch('/api/sessions?limit=10')).json();
-    $('sess').innerHTML=list.map(x=>
-      '<tr><td>'+new Date(x.start).toLocaleString()+'</td>'+
-      '<td>'+(x.distance_m/1000).toFixed(2)+' km</td>'+
-      '<td>'+x.steps+'</td><td>'+x.kcal+' kcal</td>'+
-      '<td>'+Math.round(x.duration_s/60)+' min</td></tr>').join('');
+    $('sess').innerHTML=list.map(x=>{
+      // F4: unreported counters are hidden per row
+      const steps=x.steps>0?`<td>${x.steps}</td>`:'';
+      const kcal=x.kcal>0?`<td>${x.kcal} kcal</td>`:'';
+      return '<tr><td>'+new Date(x.start).toLocaleString()+'</td>'+
+      '<td>'+(x.distance_m/1000).toFixed(2)+' km</td>'+steps+kcal+
+      '<td>'+Math.round(x.duration_s/60)+' min</td></tr>';}).join('');
   }catch(e){}
   setTimeout(sessions,30000);
 }

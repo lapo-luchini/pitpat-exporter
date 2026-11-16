@@ -137,9 +137,13 @@ Normalise everything to SI internally: speed in m/s, distance in metres
 Hardware note (the 52-byte variant seen on real hardware, C4:A9:B8:…):
 the frame starts `68 34` and is 52 bytes long, but the field offsets
 above are unchanged and the values decoded correctly. Bytes 11–19
-(steps @14 and kcal @18) were all zero at ~1 km/h on this model; the
-tail carries what looks like a device serial. Don't guess extra
-offsets from short traces.
+(steps @14 and kcal @18) were all zero at ~1 km/h even after ~30 s and
+some metres of walking, so this model hasn't shown steps/kcal yet. The
+UI hides a counter that is still 0 while the session distance exceeds
+~50 m ("not reported"); metrics and sessions.jsonl keep 0, which is
+the truthful value. The tail carries what looks like a device serial.
+Don't guess extra offsets from short traces; a longer debug trace at a
+normal walking speed may reveal the real locations.
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
 

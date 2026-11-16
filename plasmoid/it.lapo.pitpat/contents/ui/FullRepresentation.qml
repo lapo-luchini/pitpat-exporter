@@ -29,6 +29,13 @@ Item {
 
     property var lastSessions: []
 
+    // F4: a counter still at 0 after ~50 m of walking is treated as
+    // "not reported by this treadmill" and hidden
+    function sessionCounterUnreported(v) {
+        const ses = snap.session;
+        return !ses || (v === 0 && ses.distance_m > 50);
+    }
+
     implicitWidth: Kirigami.Units.gridUnit * 18
     implicitHeight: Kirigami.Units.gridUnit * 22
 
@@ -95,11 +102,17 @@ Item {
             PlasmaComponents3.Label {
                 text: full.snap.session ? i18n("%1 km", (full.snap.session.distance_m / 1000).toFixed(2)) : "–"
             }
+            // F4: some models don't report steps/kcal — hide a zero
+            // counter once the session distance shows the walk is real
             PlasmaComponents3.Label {
-                text: full.snap.session ? i18n("%1 steps", full.snap.session.steps) : "–"
+                visible: full.snap.session
+                    && !full.sessionCounterUnreported(full.snap.session.steps)
+                text: full.snap.session ? i18n("%1 steps", full.snap.session.steps) : ""
             }
             PlasmaComponents3.Label {
-                text: full.snap.session ? i18n("%1 kcal", full.snap.session.kcal) : "–"
+                visible: full.snap.session
+                    && !full.sessionCounterUnreported(full.snap.session.kcal)
+                text: full.snap.session ? i18n("%1 kcal", full.snap.session.kcal) : ""
             }
             PlasmaComponents3.Label {
                 text: full.snap.session ? i18n("%1 min", Math.round(full.snap.session.duration_s / 60)) : "–"
@@ -258,11 +271,16 @@ Item {
             model: full.lastSessions
             delegate: PlasmaComponents3.Label {
                 required property var modelData
-                text: i18n("%1 — %2 km, %3 steps, %4 min",
-                    new Date(modelData.start).toLocaleString(Qt.locale(), "MM-dd hh:mm"),
-                    (modelData.distance_m / 1000).toFixed(2),
-                    modelData.steps,
-                    Math.round(modelData.duration_s / 60))
+                text: {
+                    const counters = modelData.steps > 0
+                        ? i18n(", %1 steps", modelData.steps)
+                        : "";
+                    return i18n("%1 — %2 km%3, %4 min",
+                        new Date(modelData.start).toLocaleString(Qt.locale(), "MM-dd hh:mm"),
+                        (modelData.distance_m / 1000).toFixed(2),
+                        counters,
+                        Math.round(modelData.duration_s / 60));
+                }
                 elide: Text.ElideRight
             }
             visible: count > 0

@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: ISC
 import QtQuick 2.15
 import QtQuick.Layouts
-import QtQuick.Controls as QQC
 import org.kde.plasma.plasmoid 2.0
+import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
 /**
- * Compact panel item (REVIEW round-8 F2): the panel thickness picks the
- * level of detail, no config option. While a session is open
- * (including paused):
- *   < 1 line → icon + `1.23 km` (icon only on vertical panels)
+ * Compact panel item (§10): the panel thickness picks the level of detail
+ * while a session is open (including paused):
  *   1 line   → `1.23 km · 2.5 km/h`
  *   2 lines  → distance (larger) / speed
  *   3+ lines → distance / speed / session time (mm:ss)
- * Distance first, always metric. When stopped: icon only.
+ * Distance first, always metric. Vertical panels: icon only. When
+ * stopped: icon only. The tooltip lives in main.qml (toolTip*Text).
  */
 Item {
     id: compact
@@ -25,24 +24,19 @@ Item {
     readonly property real sessionKm: hasSession
         ? root.snap.session.distance_m / 1000.0
         : 0.0
-    readonly property real sessionMin: hasSession
-        ? root.snap.session.duration_s / 60.0
-        : 0.0
 
-    // how many text lines fit at a readable size next to the icon
+    readonly property bool vertical:
+        Plasmoid.formFactor === PlasmaCore.Types.Vertical
+
+    // how many text lines fit next to the icon at a readable size (G1:
+    // derived from the panel thickness via gridUnit, no hard pixels)
     readonly property int lines: {
-        const h = height;
-        const oneLine = Kirigami.Units.gridUnit * 1.6;
-        if (h < oneLine) {
+        if (vertical) {
             return 0;
         }
-        return Math.max(0, Math.floor(h / oneLine) - 0);
+        const oneLine = Kirigami.Units.gridUnit * 1.6;
+        return Math.floor(height / oneLine);
     }
-
-    // width follows the widest line plus the icon (F2: no clipping)
-    Layout.minimumWidth: icon.width
-        + (compact.onMove ? textCol.width + Kirigami.Units.smallSpacing : 0)
-    Layout.minimumHeight: Kirigami.Units.gridUnit * 2
 
     Kirigami.Icon {
         id: icon
@@ -51,57 +45,50 @@ Item {
             left: parent.left
             verticalCenter: parent.verticalCenter
         }
-        width: Kirigami.Units.gridUnit
-        height: width
+        // fill the panel thickness; capped in very thick panels
+        height: Math.min(parent.height, Kirigami.Units.gridUnit * 3)
+        width: height
         opacity: compact.connected ? 1 : 0.35
     }
 
     Text {
-        // single-line mode
-        visible: compact.lines < 2
-        text: {
-            if (!compact.hasSession) {
-                return "";
-            }
-            if (compact.lines < 1) {
-                return compact.sessionKm.toFixed(2) + " km";
-            }
-            return compact.sessionKm.toFixed(2) + " km · "
-                + root.snap.speed_kmh.toFixed(1) + " km/h";
-        }
+        id: singleLine
+        // one-line mode: `1.23 km · 2.5 km/h`
+        visible: compact.onMove && compact.lines === 1
+        text: compact.sessionKm.toFixed(2) + " km · "
+            + root.snap.speed_kmh.toFixed(1) + " km/h"
         color: Kirigami.Theme.textColor
-        font.pixelSize: Math.min(layout.height / 2.4, Kirigami.Units.gridUnit * 1.1)
-        visible: text.length > 0 && compact.onMove
+        font.pixelSize: icon.height / 2.4
         anchors {
             left: icon.right
-            right: parent.right
             verticalCenter: parent.verticalCenter
+            leftMargin: Kirigami.Units.smallSpacing
         }
     }
 
     Column {
         id: textCol
         // multi-line modes
-        visible: compact.lines >= 2
+        visible: compact.onMove && compact.lines >= 2
+        spacing: 0
         anchors {
             left: icon.right
-            right: parent.right
             verticalCenter: parent.verticalCenter
+            leftMargin: Kirigami.Units.smallSpacing
         }
 
         Text {
             // distance first and larger
             text: compact.sessionKm.toFixed(2) + " km"
             color: Kirigami.Theme.textColor
-            font.pixelSize: layout.height / 2.4
+            font.pixelSize: icon.height / 2.2
             font.bold: true
         }
 
         Text {
-            visible: compact.lines >= 2
             text: root.snap.speed_kmh.toFixed(1) + " km/h"
             color: Kirigami.Theme.textColor
-            font.pixelSize: layout.height / 3.2
+            font.pixelSize: icon.height / 3.0
         }
 
         Text {
@@ -117,9 +104,21 @@ Item {
                     : m + ":" + String(r).padStart(2, "0");
             }
             color: Kirigami.Theme.disabledTextColor
-            font.pixelSize: layout.height / 3.6
+            font.pixelSize: icon.height / 3.4
         }
     }
+
+    // width follows the widest visible line plus the icon (G1: sized from
+    // content, not anchored to the parent, so nothing is clipped)
+    Layout.minimumWidth: icon.width + Kirigami.Units.smallSpacing
+        + (compact.onMove && compact.lines === 1 ? singleLine.implicitWidth : 0)
+        + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
+    Layout.preferredWidth: Layout.minimumWidth
+    Layout.minimumHeight: Kirigami.Units.gridUnit * 2
+
+    // touchpad gestures send many small angleDelta events: accumulate and
+    // step once per ±120 (REVIEW round-2 A6)
+    property real wheelAccum: 0
 
     MouseArea {
         id: mouse
@@ -134,8 +133,6 @@ Item {
             }
         }
         onWheel: wheel => {
-            // touchpads send many small angleDelta events per gesture:
-            // accumulate and step once per ±120 (REVIEW round-2 A6)
             wheelAccum += wheel.angleDelta.y;
             if (Math.abs(wheelAccum) < 120) {
                 return;
@@ -143,28 +140,7 @@ Item {
             root.wheelAdjust(wheelAccum > 0);
             wheelAccum = 0;
         }
-
-        QQC.ToolTip {
-            id: tip
-            visible: mouse.containsMouse && mouse.buttons === Qt.NoButton
-            delay: 350
-            timeout: 8000
-            text: {
-                const head = root.connected
-                    ? i18nc("tooltip head", "%1 · %2 km/h",
-                            root.snap.state, root.snap.speed_kmh.toFixed(1))
-                    : root.snap.state === "sleeping"
-                        ? i18n("asleep")
-                        : i18n("pitpat daemon not running");
-                const ses = root.hasSession
-                    ? i18nc("tooltip", "session: %1 km", sessionKm.toFixed(2))
-                    : i18nc("tooltip empty", "no open session");
-                const today = root.snap.today
-                    ? i18nc("tooltip", "today: %1 km",
-                            (root.snap.today.distance_m / 1000).toFixed(2))
-                    : "";
-                return head + "\n" + ses + "\n" + today;
-            }
-        }
+        // the Plasma tooltip comes from toolTipMainText/SubText in
+        // main.qml (G1: no second QQC.ToolTip here)
     }
 }

@@ -233,6 +233,7 @@ Item {
         // stop: visually distinct, always reachable while working (§9)
         PlasmaComponents3.Button {
             enabled: full.reachable && !root.busy && full.snap.state !== "stopped"
+            onClicked: root.stop()
             text: i18n("Stop")
             icon.name: "media-playback-stop"
             Layout.fillWidth: true

@@ -489,9 +489,14 @@ Meta+End → `pitpat stop`.
 - Talks to the daemon with `XMLHttpRequest`. Poll `/api/state` every 1 s while the popup is open
   or the belt is moving, otherwise every 10 s.
 - **Compact representation** (panel): icon (`org.kde.plasma` icon `"run-build"` or similar
-  standard icon; a custom SVG is fine) plus, while a session is open, current speed and session
-  distance (e.g. `3.2 · 1.23 km`). Icon greyed out when disconnected. Middle-click =
-  toggle start/pause. Mouse wheel over it = ±0.1 km/h.
+  standard icon; a custom SVG is fine) plus, while a session is open, the session distance
+  first (e.g. `1.23 km · 3.2 km/h`). **No config option: the panel thickness picks the level
+  of detail** — height in text lines (from `Kirigami.Units.gridUnit`): icon + distance only
+  when very thin, `1.23 km · 2.5 km/h` on one line, distance (larger) / speed on two, plus the
+  session time (`mm:ss`) on three; the width follows the widest line so nothing is clipped.
+  Vertical panels keep the icon only. Distance always comes first. Icon greyed out when
+  disconnected. Left click = popup, middle-click = toggle start/pause. Mouse wheel over it =
+  ±0.1 km/h.
 - **Full representation** (popup): same information and controls as the web page (§9) except the
   sessions table (show only the last 3 sessions), in native Plasma style.
 - **Tooltip:** state, speed, session distance, today's distance.
@@ -500,7 +505,10 @@ Meta+End → `pitpat stop`.
   each distance milestone (config, default every 1 km of session distance), target reached,
   disconnect while running.
 - **Config page** (`main.xml` + `configGeneral.qml`): daemon URL, token, milestone km (0 = off),
-  show speed in panel (bool).
+  pin (keep the popup open while clicking elsewhere).
+- **Popup pin** (`window-pin` tool button in the popup's top row, bound to the `pin` config,
+  `hideOnWindowDeactivate: !pin`): while pinned the popup stays open and live-updates during a
+  walk.
 - When the daemon is unreachable: show "pitpat daemon not running" with a hint, and no errors in
   the log beyond a single warning.
 

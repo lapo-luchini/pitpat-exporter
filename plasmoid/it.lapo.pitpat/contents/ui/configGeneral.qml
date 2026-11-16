@@ -17,7 +17,6 @@ KCM.SimpleKCM {
     property string cfg_daemonUrl: ""
     property string cfg_token: ""
     property real cfg_milestoneKm: 1.0
-    property bool cfg_showSpeedInPanel: true
 
     Kirigami.FormLayout {
         QQC.TextField {
@@ -49,11 +48,6 @@ KCM.SimpleKCM {
                 return Number.fromLocaleString(locale, text);
             }
             Kirigami.FormData.label: i18n("Milestone every X km (0 = off):")
-        }
-        QQC.CheckBox {
-            text: i18n("Show speed in panel")
-            checked: general.cfg_showSpeedInPanel
-            onToggled: general.cfg_showSpeedInPanel = checked
         }
         Kirigami.InlineMessage {
             Layout.fillWidth: true

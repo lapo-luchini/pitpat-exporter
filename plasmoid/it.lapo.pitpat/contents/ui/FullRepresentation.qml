@@ -71,6 +71,19 @@ Item {
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Kirigami.Units.smallSpacing
 
+        // F3: pin — the popup stays open and live-updates during a walk
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            PlasmaComponents3.ToolButton {
+                icon.name: "window-pin"
+                checkable: true
+                checked: Plasmoid.configuration.pin
+                onToggled: Plasmoid.configuration.pin = checked
+                Accessible.name: i18n("Keep popup open")
+            }
+        }
+
         // state / connection chip
         PlasmaComponents3.Label {
             text: full.working && full.onMove

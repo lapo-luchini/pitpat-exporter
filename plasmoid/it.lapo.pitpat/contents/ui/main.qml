@@ -10,6 +10,9 @@ import org.kde.plasma.plasmoid 2.0
 PlasmoidItem {
     id: root
 
+    // F3: while pinned the popup stays open and live-updates
+    hideOnWindowDeactivate: !Plasmoid.configuration.pin
+
     // ------------------------------------------------------------ state
     readonly property string apiBase: Plasmoid.configuration.daemonUrl
     readonly property string token: Plasmoid.configuration.token || ""

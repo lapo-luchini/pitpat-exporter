@@ -59,6 +59,31 @@ Item {
         return !ses || (v === 0 && ses.distance_m > 50);
     }
 
+    // K4: one formatter per field so the popup and the panel agree
+    function fmtDistance(km) { return Number(km).toFixed(2) + " km"; }
+    function fmtSpeed(kmh) { return Number(kmh).toFixed(1) + " km/h"; }
+    function fmtTime(sec) {
+        const s = Math.round(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = s % 60;
+        return h > 0
+            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
+            : m + ":" + String(r).padStart(2, "0");
+    }
+    // K3: same labels as the panel tooltip
+    function stateLabel(state) {
+        switch (state) {
+            case "running": return i18n("walking");
+            case "starting": return i18n("starting…");
+            case "paused": return i18n("paused");
+            case "stopped": return i18n("stopped");
+            case "sleeping": return i18n("asleep");
+            case "disconnected": return i18n("disconnected");
+            default: return state;
+        }
+    }
+
     implicitWidth: Kirigami.Units.gridUnit * 18
     implicitHeight: Kirigami.Units.gridUnit * 22
 
@@ -115,37 +140,52 @@ Item {
             }
         }
 
-        // state / connection chip
-        PlasmaComponents3.Label {
-            text: full.working && full.onMove
-                ? i18nc("chip", "%1 · %2 km",
-                        full.snap.state,
-                        (full.snap.session ? full.snap.session.distance_m / 1000 : 0).toFixed(2))
-                : full.asleep ? i18nc("chip", "asleep")
-                : (full.working ? full.snap.state : i18n("pitpat daemon not running"))
-            horizontalAlignment: Text.AlignHCenter
+        // state / connection chip (K3 labels, coloured dot)
+        RowLayout {
             Layout.fillWidth: true
-            font.bold: true
-            color: !full.working
-                ? Kirigami.Theme.disabledTextColor
-                : full.snap.state === "running" ? "#2ecc71"
-                : full.snap.state === "paused" ? "#f1c40f"
-                : Kirigami.Theme.textColor
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Kirigami.Units.smallSpacing
+            Rectangle {
+                width: Kirigami.Units.smallSpacing * 1.2
+                height: width
+                radius: width / 2
+                visible: full.working || full.asleep
+                color: full.snap.state === "running" ? "#2ecc71"
+                    : full.snap.state === "paused" ? "#f1c40f"
+                    : full.snap.state === "starting" ? "#3498db"
+                    : full.asleep ? Kirigami.Theme.disabledTextColor
+                    : Kirigami.Theme.textColor
+            }
+            PlasmaComponents3.Label {
+                text: full.working || full.asleep
+                    ? root.stateLabel(full.snap.state)
+                    : i18n("pitpat daemon not running")
+                font.bold: true
+            }
+            Item { Layout.fillWidth: true }
         }
 
-        PlasmaComponents3.Label {
-            text: full.onMove ? Number(full.snap.speed_kmh).toFixed(1) : "–"
+        // K4 hero row: distance / time / speed, same formatters as the panel
+        RowLayout {
+            spacing: Kirigami.Units.mediumSpacing * 2
             Layout.alignment: Qt.AlignHCenter
-            font.pointSize: 34
-            font.weight: Font.Bold
+            Kirigami.Heading {
+                level: 2
+                text: full.snap.session ? fmtDistance(full.snap.session.distance_m / 1000) : "–"
+            }
+            Kirigami.Heading {
+                level: 3
+                text: full.onMove ? fmtTime(full.snap.session.duration_s) : "–"
+            }
+            Kirigami.Heading {
+                level: 3
+                text: full.onMove ? fmtSpeed(full.snap.speed_kmh) : "–"
+            }
         }
 
         RowLayout {
             spacing: Kirigami.Units.mediumSpacing * 2
             Layout.alignment: Qt.AlignHCenter
-            PlasmaComponents3.Label {
-                text: full.snap.session ? i18n("%1 km", (full.snap.session.distance_m / 1000).toFixed(2)) : "–"
-            }
             // F4: some models don't report steps/kcal — hide a zero
             // counter once the session distance shows the walk is real
             PlasmaComponents3.Label {
@@ -157,9 +197,6 @@ Item {
                 visible: full.snap.session
                     && !full.sessionCounterUnreported(full.snap.session.kcal)
                 text: full.snap.session ? i18n("%1 kcal", full.snap.session.kcal) : ""
-            }
-            PlasmaComponents3.Label {
-                text: full.snap.session ? i18n("%1 min", Math.round(full.snap.session.duration_s / 60)) : "–"
             }
         }
 
@@ -195,15 +232,24 @@ Item {
             }
         }
 
-        // controls row: toggle, ±0.1, slider
+        // controls row: toggle, stop (K4: ToolButton, no full-width red
+        // row), ±0.1, slider
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
-            PlasmaComponents3.Button {
+            PlasmaComponents3.ToolButton {
                 display: PlasmaComponents3.AbstractButton.IconOnly
                 icon.name: full.snap.state === "running" ? "media-playback-pause" : "media-playback-start"
                 enabled: full.reachable && !root.busy && full.snap.state !== "starting"
                 onClicked: root.toggleStartPause()
+            }
+            PlasmaComponents3.ToolButton {
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                icon.name: "media-playback-stop"
+                enabled: full.reachable && !root.busy && full.snap.state !== "stopped"
+                onClicked: root.stop()
+                QQC.ToolTip.text: i18n("Stop and end the walk")
+                QQC.ToolTip.visible: hovered
             }
             PlasmaComponents3.Button {
                 // §4.5a: waking without starting the belt
@@ -275,8 +321,18 @@ Item {
             }
         }
 
-        // target inputs with Set/Clear
+        // K4: target section, collapsed by default
+        property bool targetOpen: false
+        PlasmaComponents3.ToolButton {
+            id: targetToggle
+            text: targetOpen
+                ? i18n("Target ▾")
+                : i18n("Target ▸")
+            icon.name: "flag-red"
+            onClicked: full.targetOpen = !full.targetOpen
+        }
         RowLayout {
+            visible: full.targetOpen
             spacing: Kirigami.Units.smallSpacing
             Layout.fillWidth: true
             QQC.TextField {
@@ -302,7 +358,10 @@ Item {
             }
         }
 
-        // last 3 sessions
+        Kirigami.Separator {
+            Layout.fillWidth: true
+            visible: full.lastSessions.length > 0
+        }
         PlasmaComponents3.Label {
             text: i18n("Last walks")
             font.bold: true

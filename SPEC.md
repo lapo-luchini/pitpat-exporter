@@ -514,7 +514,11 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   disconnected. Left click = popup, middle-click = toggle start/pause. Mouse wheel over it =
   ±0.1 km/h.
 - **Full representation** (popup): same information and controls as the web page (§9) except the
-  sessions table (show only the last 3 sessions), in native Plasma style.
+  sessions table (show only the last 3 sessions), in native Plasma style. State chip with a
+  coloured dot and the human labels; one hero row (distance / time / speed with the panel's
+  formatters); Stop as a ToolButton next to Start/Pause (tooltip "Stop and end the walk"); the
+  target section collapses behind a "Target ▸" toggle; last walks with relative dates ("today
+  17:16", "yesterday 09:02") and a separator before the history.
 - **Tooltip:** state, speed, session distance, today's distance.
 - **Notifications** (via the KF6 `org.kde.notification` QML module; if that turns out not to work
   inside a plasmoid, fall back to running `notify-send` through the `executable` engine):

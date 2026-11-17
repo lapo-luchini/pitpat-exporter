@@ -148,7 +148,9 @@ steps 65 vs 66), but very short, light steps are under-counted (114
 counted vs 77) — the daemon reports the device value as is. kcal @18
 is correct. After a stop the treadmill may reset duration and kcal to
 0 while distance drops first; steps behaved inconsistently between
-traces (staying at 268 once, resetting the other time).
+traces (staying at 268 once, resetting the other time). Distance does
+not drop at a stop — it stays until the next start (the counters reset
+together then).
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
 

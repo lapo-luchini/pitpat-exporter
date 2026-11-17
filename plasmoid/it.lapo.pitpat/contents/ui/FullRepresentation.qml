@@ -120,6 +120,15 @@ Item {
             }
         }
 
+        // K6/L4: walks not being saved must stay visible
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: full.snap.persist_ok === false
+            type: Kirigami.MessageType.Warning
+            text: i18n("Walks are not being saved: %1",
+                       full.snap.persist_error || "unknown reason")
+        }
+
         // state / connection chip (K3 labels, coloured dot)
         RowLayout {
             Layout.fillWidth: true

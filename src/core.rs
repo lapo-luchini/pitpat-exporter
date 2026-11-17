@@ -373,7 +373,26 @@ impl Core {
             self.metrics.persist_errors_total.inc();
             return;
         }
+        // K6/L4: clear the error only when the thing that failed is fixed.
+        // totals.json just saved; if sessions.jsonl was the problem, probe
+        // appendability (without writing) before clearing.
         self.persist_error = None;
+        let sessions_path = self.state_dir.join("sessions.jsonl");
+        if sessions_path.exists() {
+            match std::fs::OpenOptions::new()
+                .append(true)
+                .open(&sessions_path)
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    self.persist_error = Some(format!(
+                        "sessions.jsonl: {err} (chown the files in the state dir)"
+                    ));
+                }
+            }
+        } else if let Err(reason) = crate::session::check_state_dir_writable(&self.state_dir) {
+            self.persist_error = Some(reason);
+        }
         // K6: retry any session records held back by an earlier failure
         let held: Vec<_> = self.pending_records.drain(..).collect();
         for rec in held {
@@ -710,6 +729,17 @@ impl Core {
                 "belt targets its own default; queueing SetSpeed"
             );
             let _ = self.queue_set_speed(v);
+        }
+    }
+
+    /// K6/L4: held records die with the process — dump each as its JSON
+    /// line at error level so they can be recovered from the journal with
+    /// a plain `grep 'unsaved walk' … >> sessions.jsonl`.
+    fn dump_held_records(&mut self) {
+        for rec in self.pending_records.drain(..) {
+            if let Ok(line) = serde_json::to_string(&rec) {
+                tracing::error!("unsaved walk: {line}");
+            }
         }
     }
 
@@ -1201,6 +1231,8 @@ pub async fn shutdown_flow<C: Notify>(core: &mut Core, conn: &mut C) {
     }
     core.on_disconnect(DeadReason::Shutdown);
     core.persist();
+    // K6/L4: any walks still held (unsaved) are dumped as journal lines
+    core.dump_held_records();
     // BlueZ keeps the LE link up after the notify stream dies unless the
     // Device.Disconnect goes out explicitly: the phone app would stay
     // locked out (REVIEW round-2 A4)

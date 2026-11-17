@@ -40,12 +40,12 @@ and export its data as Prometheus metrics.
 ## 2. Architecture
 
 ```
-            ┌──────────────────────────── pitpat daemon (Rust, 1 process) ───────────────────────────┐
+            ┌──────────────────────────── pitpat daemon (Rust, 1 process) ──────────────────────────┐
  BlueZ ◄──► │ Link (trait)  ──events──►  Core state machine  ──►  Sessions + lifetime totals (disk) │
- (D-Bus)    │  ├ BleLink (bluer)            │  ▲ commands                                            │
-            │  └ SimLink (--simulate)       ▼  │                                                     │
-            │                         HTTP server (axum): /metrics /api/* / (web page)             │
-            └──────────────────────────────────────▲───────────────────────────────────────────────┘
+ (D-Bus)    │  ├ BleLink (bluer)            │  ▲ commands                                           │
+            │  └ SimLink (--simulate)       ▼  │                                                    │
+            │                         HTTP server (axum): /metrics /api/* / (web page)              │
+            └──────────────────────────────────────▲────────────────────────────────────────────────┘
                                                    │ HTTP/JSON (localhost)
                      ┌─────────────────────────────┼─────────────────────────────┐
               Plasma 6 widget (QML)        pitpat CLI (same binary)       browser / Prometheus

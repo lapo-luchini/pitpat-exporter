@@ -31,29 +31,9 @@ Item {
     // K4/L1: the Target section; opens by default when a target is set
     property bool targetOpen: snap.target
         && (snap.target.distance_m || snap.target.duration_s) ? true : false
-    // K5: fetch sessions only when the popup opens, when a walk starts or
-    // ends (the last_end_reason / session-start key changes), and once a
-    // minute otherwise — not on every 1 s snapshot
-    property string lastSessionKey: ""
-    property string lastEndKey: ""
-    property bool lastFetchMinute: false
-    property var snapArrival: new Date()
-
-    function sessionKeyChanged() {
-        const start = snap.session ? snap.session.start : "";
-        const end = snap.last_end_reason || "";
-        if (start !== lastSessionKey || end !== lastEndKey) {
-            lastSessionKey = start;
-            lastEndKey = end;
-            return true;
-        }
-        const now = new Date();
-        if (now - snapArrival > 60000) {
-            snapArrival = now;
-            return lastFetchMinute;
-        }
-        return false;
-    }
+    // K5/L2: fetch sessions when a walk starts or ends (the key changes),
+    // once a minute while expanded, and when the popup opens
+    property string fetchKey: ""
 
     // F4: a counter still at 0 after ~50 m of walking is treated as
     // "not reported by this treadmill" and hidden
@@ -68,13 +48,27 @@ Item {
     implicitHeight: Kirigami.Units.gridUnit * 22
 
     onSnapChanged: {
-        const d = new Date();
-        if (lastFetchMinute === false) {
-            lastFetchMinute = true;
-        } else if (d.getSeconds() !== snapArrival.getSeconds()) {
-            snapArrival = snapArrival; // keep the reference date stable
+        const key = (snap.session ? snap.session.start : "")
+            + "|" + (snap.last_end_reason || "");
+        if (key !== fetchKey) {
+            fetchKey = key;
+            refreshSessions();
         }
-        refreshSessions();
+    }
+
+    Timer {
+        interval: 60000
+        repeat: true
+        running: root.expanded
+        onTriggered: refreshSessions()
+    }
+    Connections {
+        target: root
+        function onExpandedChanged() {
+            if (root.expanded) {
+                refreshSessions();
+            }
+        }
     }
 
     function refreshSessions() {
@@ -160,15 +154,15 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             Kirigami.Heading {
                 level: 2
-                text: full.snap.session ? fmtDistance(full.snap.session.distance_m / 1000) : "–"
+                text: full.snap.session ? root.fmtDistance(full.snap.session.distance_m / 1000) : "–"
             }
             Kirigami.Heading {
                 level: 3
-                text: full.snap.session ? fmtTime(full.snap.session.duration_s) : "–"
+                text: full.snap.session ? root.fmtTime(full.snap.session.duration_s) : "–"
             }
             Kirigami.Heading {
                 level: 3
-                text: fmtSpeed(full.snap.speed_kmh)
+                text: root.fmtSpeed(full.snap.speed_kmh)
             }
         }
 
@@ -347,19 +341,22 @@ Item {
             clip: true
             spacing: Kirigami.Units.smallSpacing / 2
             model: full.lastSessions
-            delegate: PlasmaComponents3.Label {
+            // L1: relative dates, aligned columns (when / km / min)
+            delegate: RowLayout {
                 required property var modelData
-                text: {
-                    const counters = modelData.steps > 0
-                        ? i18n(", %1 steps", modelData.steps)
-                        : "";
-                    return i18n("%1 — %2 km%3, %4 min",
-                        new Date(modelData.start).toLocaleString(Qt.locale(), "MM-dd hh:mm"),
-                        (modelData.distance_m / 1000).toFixed(2),
-                        counters,
-                        Math.round(modelData.duration_s / 60));
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    text: root.fmtWhen(modelData.start)
+                    elide: Text.ElideRight
                 }
-                elide: Text.ElideRight
+                PlasmaComponents3.Label {
+                    text: root.fmtDistance(modelData.distance_m / 1000)
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                }
+                PlasmaComponents3.Label {
+                    text: i18n("%1 min", Math.round(modelData.duration_s / 60))
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                }
             }
             visible: count > 0
         }

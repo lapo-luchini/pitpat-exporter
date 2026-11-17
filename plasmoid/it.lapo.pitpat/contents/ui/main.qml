@@ -18,6 +18,19 @@ PlasmoidItem {
     // K3/K4: one formatter set per UI, shared by both representations
     function fmtDistance(km) { return Number(km).toFixed(2) + " km"; }
     function fmtSpeed(kmh) { return Number(kmh).toFixed(1) + " km/h"; }
+    function fmtWhen(iso) {
+        // K4/L1: "today 17:16", "yesterday 09:02", then the date
+        const d = new Date(iso);
+        const now = new Date();
+        const hm = Qt.formatTime(d, "hh:mm");
+        if (d.getDate() === now.getDate() && now - d < 86400000) {
+            return i18n("today") + " " + hm;
+        }
+        if (now - d < 86400000 * 2) {
+            return i18n("yesterday") + " " + hm;
+        }
+        return Qt.formatDate(d, "MMM d");
+    }
     function fmtTime(sec) {
         const s = Math.round(sec);
         const h = Math.floor(s / 3600);

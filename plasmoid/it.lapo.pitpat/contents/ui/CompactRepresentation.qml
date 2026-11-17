@@ -6,14 +6,16 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
 /**
- * Compact panel item (§10): the panel thickness picks the level of detail
- * while a session is open (including paused):
+ * Compact panel item (§10): the panel thickness picks how many lines
+ * show while a session is open (including paused); the line ORDER is
+ * configurable (line1/2/3: distance | time | speed, 2/3 may be none).
  *   < 1 line → icon + `1.23 km` only
- *   1 line   → `1.23 km · 2.5 km/h`
- *   2 lines  → distance (larger) / speed
- *   3+ lines → distance / speed / session time (mm:ss)
- * Distance first, always metric. Vertical panels: icon only. When
- * stopped: icon only. The tooltip lives in main.qml (toolTip*Text).
+ *   1 line   → line1 · line2 joined
+ *   2 lines  → line1 (larger) / line2
+ *   3+ lines → line1 / line2 / line3
+ * `none` lines are skipped without gaps. Distance first by default.
+ * Vertical panels: icon only. When stopped: icon only. The tooltip
+ * lives in main.qml (toolTip*Text).
  */
 Item {
     id: compact
@@ -43,25 +45,29 @@ Item {
     readonly property bool showDistance: onMove && !vertical
 
     // K2: configurable line order; the thickness still picks how many
-    // lines show. Values: distance | time | speed | none (lines 2/3).
+    // lines show. Values: distance | time | speed | none (lines 2/3);
+    // defaults match main.xml (distance/time/speed).
     readonly property var lineOrder: [
         Plasmoid.configuration.line1 || "distance",
-        Plasmoid.configuration.line2 || "none",
-        Plasmoid.configuration.line3 || "none",
+        Plasmoid.configuration.line2 || "time",
+        Plasmoid.configuration.line3 || "speed",
     ]
     readonly property var lineTexts: {
         const ses = root.snap.session;
-        const dist = compact.sessionKm.toFixed(2) + " km";
-        const time = ses ? fmtTime(ses.duration_s) : "–";
-        const speed = root.snap.speed_kmh.toFixed(1) + " km/h";
+        const dist = root.fmtDistance(compact.sessionKm);
+        const time = ses ? root.fmtTime(ses.duration_s) : "–";
+        const speed = root.fmtSpeed(root.snap.speed_kmh);
         return { distance: dist, time: time, speed: speed };
     }
+    // L3: how many fields each mode needs — 0 lines: 1 (distance only),
+    // 1 line: 2 joined, 2+ lines: min(lines, 3)
+    readonly property int visibleCount: lines === 0 ? 1
+        : Math.min(lines, 3)
     // the visible lines, `none` skipped without leaving gaps
     readonly property var visibleLines: {
-        const n = compact.lines === 0 ? 1 : Math.min(compact.lines, 3);
         const out = [];
         for (const l of lineOrder) {
-            if (l !== "none" && out.length < n) {
+            if (l !== "none" && out.length < visibleCount) {
                 out.push(l);
             }
         }
@@ -89,12 +95,11 @@ Item {
 
     Text {
         id: singleLine
-        // K2: joined with ` · ` (line 1 only if line 2 is none)
-        visible: compact.showDistance && compact.visibleLines.length >= 1
-            && compact.visibleLines.length <= 2
+        // L3: singleLine for lines <= 1 (two fields joined with ` · `)
+        visible: compact.showDistance && compact.lines <= 1
         text: {
-            const t = compact.lineTexts;
-            const parts = compact.visibleLines.map(function (l) { return t[l]; });
+            const parts = compact.visibleLines.map(
+                function (l) { return compact.lineTexts[l]; });
             return parts.join(" · ");
         }
         color: Kirigami.Theme.textColor
@@ -108,8 +113,8 @@ Item {
 
     Column {
         id: textCol
-        // K2: multi-line modes render the configured lines in order
-        visible: compact.showDistance && compact.visibleLines.length >= 2
+        // L3: textCol for lines >= 2 — the two modes never overlap
+        visible: compact.showDistance && compact.lines >= 2
         spacing: 0
         anchors {
             left: icon.right
@@ -120,10 +125,10 @@ Item {
         Repeater {
             model: compact.visibleLines
             Text {
+                required property int index
                 required property string modelData
                 text: compact.lineTexts[modelData]
                 color: index === 0 ? Kirigami.Theme.textColor
-                    : index === 1 ? Kirigami.Theme.textColor
                     : Kirigami.Theme.disabledTextColor
                 font.pixelSize: index === 0 ? icon.height / 2.2 : icon.height / 3.0
                 font.bold: index === 0
@@ -142,13 +147,13 @@ Item {
         : icon.width + Kirigami.Units.smallSpacing
           + (compact.showDistance && compact.lines <= 1
               ? singleLine.implicitWidth : 0)
-          + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
+          + (compact.lines >= 2 ? textCol.implicitWidth : 0)
     Layout.preferredWidth: compact.vertical
         ? Layout.minimumWidth
         : icon.width + Kirigami.Units.smallSpacing
           + (compact.showDistance && compact.lines <= 1
               ? singleLine.implicitWidth : 0)
-          + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
+          + (compact.lines >= 2 ? textCol.implicitWidth : 0)
     // K1: nothing else gave the item a height in a vertical panel
     Layout.minimumHeight: compact.vertical ? icon.height : 0
     Layout.preferredHeight: compact.vertical ? icon.height : 0

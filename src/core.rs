@@ -375,7 +375,8 @@ impl Core {
         }
         // K6/L4: clear the error only when the thing that failed is fixed.
         // totals.json just saved; if sessions.jsonl was the problem, probe
-        // appendability (without writing) before clearing.
+        // appendability before clearing (an open() alone writes nothing,
+        // unlike the create-dir probe below).
         self.persist_error = None;
         let sessions_path = self.state_dir.join("sessions.jsonl");
         if sessions_path.exists() {
@@ -998,6 +999,12 @@ impl Core {
         };
         self.close_session(end_reason);
         self.persist();
+        // K6/L4: held walks are dumped on EVERY shutdown path (the
+        // sleeping/waking/reconnecting exits included), not just the
+        // live-link shutdown_flow
+        if reason == DeadReason::Shutdown {
+            self.dump_held_records();
+        }
         self.address = None;
         self.publish();
     }
@@ -1235,8 +1242,6 @@ pub async fn shutdown_flow<C: Notify>(core: &mut Core, conn: &mut C) {
     }
     core.on_disconnect(DeadReason::Shutdown);
     core.persist();
-    // K6/L4: any walks still held (unsaved) are dumped as journal lines
-    core.dump_held_records();
     // BlueZ keeps the LE link up after the notify stream dies unless the
     // Device.Disconnect goes out explicitly: the phone app would stay
     // locked out (REVIEW round-2 A4)
@@ -2636,6 +2641,14 @@ mod tests {
         );
         core.check_state_dir();
         assert!(core.persist_error.is_some(), "unopenable file reported");
+
+        // L4: persist() with nothing held and the file still broken —
+        // the error must survive (no wiping by the totals save)
+        core.persist();
+        assert!(
+            core.persist_error.is_some(),
+            "the error is not cleared while the file is still broken"
+        );
 
         // a session ends while the file can't be appended: held, not lost
         core.begin_connection(None);

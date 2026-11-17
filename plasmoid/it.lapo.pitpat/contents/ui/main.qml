@@ -19,14 +19,17 @@ PlasmoidItem {
     function fmtDistance(km) { return Number(km).toFixed(2) + " km"; }
     function fmtSpeed(kmh) { return Number(kmh).toFixed(1) + " km/h"; }
     function fmtWhen(iso) {
-        // K4/L1: "today 17:16", "yesterday 09:02", then the date
+        // K4/M3: compare local calendar days, not elapsed time — "today
+        // 17:16", "yesterday 09:02", then the date
         const d = new Date(iso);
         const now = new Date();
+        const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+        const diff = Math.round((day(now) - day(d)) / 86400000);
         const hm = Qt.formatTime(d, "hh:mm");
-        if (d.getDate() === now.getDate() && now - d < 86400000) {
+        if (diff === 0) {
             return i18n("today") + " " + hm;
         }
-        if (now - d < 86400000 * 2) {
+        if (diff === 1) {
             return i18n("yesterday") + " " + hm;
         }
         return Qt.formatDate(d, "MMM d");

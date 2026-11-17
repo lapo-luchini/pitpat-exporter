@@ -341,9 +341,10 @@ Item {
             clip: true
             spacing: Kirigami.Units.smallSpacing / 2
             model: full.lastSessions
-            // L1: relative dates, aligned columns (when / km / min)
+            // L1/M3: relative dates, aligned columns (when / km / min)
             delegate: RowLayout {
                 required property var modelData
+                width: ListView.view.width
                 PlasmaComponents3.Label {
                     Layout.fillWidth: true
                     text: root.fmtWhen(modelData.start)
@@ -352,10 +353,12 @@ Item {
                 PlasmaComponents3.Label {
                     text: root.fmtDistance(modelData.distance_m / 1000)
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                    horizontalAlignment: Text.AlignRight
                 }
                 PlasmaComponents3.Label {
-                    text: i18n("%1 min", Math.round(modelData.duration_s / 60))
-                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                    text: root.fmtTime(modelData.duration_s)
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                    horizontalAlignment: Text.AlignRight
                 }
             }
             visible: count > 0

@@ -59,9 +59,10 @@ Item {
         const speed = root.fmtSpeed(root.snap.speed_kmh);
         return { distance: dist, time: time, speed: speed };
     }
-    // L3: how many fields each mode needs — 0 lines: 1 (distance only),
+    // M1: how many fields each mode needs — 0 lines: 1 (distance only),
     // 1 line: 2 joined, 2+ lines: min(lines, 3)
     readonly property int visibleCount: lines === 0 ? 1
+        : lines === 1 ? 2
         : Math.min(lines, 3)
     // the visible lines, `none` skipped without leaving gaps
     readonly property var visibleLines: {
@@ -142,18 +143,23 @@ Item {
     // K1: on vertical panels the width is the panel's to set — deriving it
     // from the icon feeds itself (icon grows with width grows with icon…),
     // so a constant is used there and the height follows the icon instead.
+    // M2: the width terms follow the visibility conditions exactly — a
+    // hidden Column keeps its implicitWidth, so a stopped walker on a
+    // thick panel must not reserve the text width
     Layout.minimumWidth: compact.vertical
         ? Kirigami.Units.gridUnit
         : icon.width + Kirigami.Units.smallSpacing
           + (compact.showDistance && compact.lines <= 1
               ? singleLine.implicitWidth : 0)
-          + (compact.lines >= 2 ? textCol.implicitWidth : 0)
+          + (compact.showDistance && compact.lines >= 2
+              ? textCol.implicitWidth : 0)
     Layout.preferredWidth: compact.vertical
         ? Layout.minimumWidth
         : icon.width + Kirigami.Units.smallSpacing
           + (compact.showDistance && compact.lines <= 1
               ? singleLine.implicitWidth : 0)
-          + (compact.lines >= 2 ? textCol.implicitWidth : 0)
+          + (compact.showDistance && compact.lines >= 2
+              ? textCol.implicitWidth : 0)
     // K1: nothing else gave the item a height in a vertical panel
     Layout.minimumHeight: compact.vertical ? icon.height : 0
     Layout.preferredHeight: compact.vertical ? icon.height : 0

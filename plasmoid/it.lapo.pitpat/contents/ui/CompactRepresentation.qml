@@ -123,14 +123,27 @@ Item {
     // width follows the widest visible line plus the icon (G1: sized from
     // content, not anchored to the parent, so nothing is clipped)
     // G1/I1: singleLine covers lines <= 1 (distance-only or distance·speed)
-    Layout.minimumWidth: icon.width + Kirigami.Units.smallSpacing
-        + (compact.showDistance && compact.lines <= 1 ? singleLine.implicitWidth : 0)
-        + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
-    Layout.preferredWidth: Layout.minimumWidth
-    // J2: no minimumHeight — a horizontal panel's thickness is the
+    // K1: on vertical panels the width is the panel's to set — deriving it
+    // from the icon feeds itself (icon grows with width grows with icon…),
+    // so a constant is used there and the height follows the icon instead.
+    Layout.minimumWidth: compact.vertical
+        ? Kirigami.Units.gridUnit
+        : icon.width + Kirigami.Units.smallSpacing
+          + (compact.showDistance && compact.lines <= 1
+              ? singleLine.implicitWidth : 0)
+          + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
+    Layout.preferredWidth: compact.vertical
+        ? Layout.minimumWidth
+        : icon.width + Kirigami.Units.smallSpacing
+          + (compact.showDistance && compact.lines <= 1
+              ? singleLine.implicitWidth : 0)
+          + (compact.onMove && compact.lines >= 2 ? textCol.implicitWidth : 0)
+    // K1: nothing else gave the item a height in a vertical panel
+    Layout.minimumHeight: compact.vertical ? icon.height : 0
+    Layout.preferredHeight: compact.vertical ? icon.height : 0
+    // J2: no minimumHeight for horizontal panels — the thickness is the
     // user's choice, and forcing 2 gridUnit would hide the thin-panel
-    // distance line (H2). Vertical panels get their height from the icon
-    // size instead.
+    // distance line (H2).
 
     // touchpad gestures send many small angleDelta events: accumulate and
     // step once per ±120 (REVIEW round-2 A6)

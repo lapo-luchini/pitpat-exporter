@@ -202,11 +202,14 @@ The reference implementation holds one pending packet and silently drops older o
   every set-speed command, and used by "start". When the treadmill reports *running*, sync
   `target_speed` to the reported speed once the belt has settled (i.e. ignore the ramp-up while
   starting) so that physical-remote changes are reflected.
-- Hardware quirk (F1): this model **ignores the speed field of the start command** and always
-  ramps to its own default (1.0). After a daemon-issued `Start(v)`, remember `v`; on the first
-  `running` packet, if the treadmill's target (@5) isn't `v`, queue `SetSpeed(v)` once, and
-  suppress the settle-sync until the belt reports `v` (at most ~10 s), so the remote pickup
-  doesn't erase the user's speed.
+- Hardware quirk (F1/K8, refined by the Nov 17 traces): when started from stopped, the belt
+  **ignores the speed field of the start command** and ramps to its own default (1.0); when a
+  `SetSpeed` starts it from paused, it also loses the speed. The daemon therefore re-asserts:
+  after a `Start(v)` or a speed-set while paused (the daemon sends `Start(v)` itself, one code
+  path), remember `v`; on `running` packets, if the treadmill's target (@5) isn't `v`, re-queue
+  `SetSpeed(v)` (timed retries, at most 3), and suppress the settle-sync until the belt reports
+  `v` (at most ~10 s), so the remote pickup doesn't erase the user's speed. Resume from paused
+  honours the Start speed and the reassertion stays silent.
 
 ---
 

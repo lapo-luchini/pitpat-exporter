@@ -462,7 +462,14 @@ impl Core {
                 let v = self.clamp(v);
                 self.target_speed_kmh = v;
                 self.forget_settle();
-                if self.moving() {
+                if self.state == State::Paused {
+                    // K8: this model starts the belt when it gets a
+                    // SetSpeed while paused but loses the speed (runs at
+                    // its own 1.0). Send Start(v) instead and arm the same
+                    // reassertion as ApiCmd::Start — one code path.
+                    self.pending_start_speed = Some(v);
+                    self.queue_back(WireCmd::Start(v))?;
+                } else if self.moving() {
                     self.queue_set_speed(v)?;
                 }
                 Ok(())
@@ -475,7 +482,11 @@ impl Core {
                 let v = self.clamp(self.target_speed_kmh + d);
                 self.target_speed_kmh = v;
                 self.forget_settle();
-                if self.moving() {
+                if self.state == State::Paused {
+                    // K8: like SpeedAbs — Start(v) from paused, one path
+                    self.pending_start_speed = Some(v);
+                    self.queue_back(WireCmd::Start(v))?;
+                } else if self.moving() {
                     self.queue_set_speed(v)?;
                 }
                 Ok(())
@@ -1708,6 +1719,26 @@ mod tests {
     }
 
     // -------------------------------------------------------- targets
+
+    /// K8: a speed preset while paused must send Start(v) (kind 0x01,
+    /// cmd 0x04, carrying v) — the belt starts on SetSpeed but loses the
+    /// speed; the reassertion is armed like ApiCmd::Start.
+    #[test]
+    fn speed_while_paused_sends_start() {
+        let dir = tmpdir("k8");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Paused, 0.0, 0, 0, 0, 0.0));
+        c.queue_api(ApiCmd::SpeedAbs(2.5)).ok();
+        // the wire packet is a Start carrying 2.5, not a SetSpeed
+        let pkt = c.next_reply();
+        assert_eq!(pkt[8], 0x01, "kind = start");
+        assert_eq!(pkt[12], 0x04, "cmd = start");
+        assert_eq!(&pkt[6..8], &2500u16.to_be_bytes());
+        // and the reassertion is armed
+        assert_eq!(c.pending_start_speed, Some(2.5));
+    }
 
     /// F1 regression: the belt ignores the start command's speed and
     /// ramps to its own default. After a daemon-issued Start(v) the

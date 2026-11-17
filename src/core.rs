@@ -477,7 +477,6 @@ impl Core {
                 if self.state == State::Sleeping {
                     self.wake_requested = true;
                 }
-                self.idle_since = Some(tokio::time::Instant::now());
                 let speed = self.clamp(s.unwrap_or(self.target_speed_kmh));
                 self.target_speed_kmh = speed;
                 self.forget_settle();
@@ -488,8 +487,7 @@ impl Core {
                     // F1: the belt ignores the start command's speed field
                     // and ramps to its own default: remember the requested
                     // speed and correct it on the first running packet
-                    self.pending_start_speed = Some(speed);
-                    self.queue_back(WireCmd::Start(speed))
+                    self.start_at(speed)
                 }
             }
             ApiCmd::Pause => {
@@ -525,13 +523,10 @@ impl Core {
                 self.target_speed_kmh = v;
                 self.forget_settle();
                 if self.state == State::Paused {
-                    // K8: this model starts the belt when it gets a
-                    // SetSpeed while paused but loses the speed (runs at
-                    // its own 1.0). Send Start(v) instead and arm the same
-                    // reassertion as ApiCmd::Start — one code path.
-                    self.pending_start_speed = Some(v);
-                    self.queue_back(WireCmd::Start(v))?;
-                } else if self.moving() {
+                    // K8: like Start — one code path
+                    return self.start_at(v);
+                }
+                if self.moving() {
                     self.queue_set_speed(v)?;
                 }
                 Ok(())
@@ -683,6 +678,15 @@ impl Core {
     /// default settle back in). The suppression ends when the belt
     /// reports the requested target, or after the window — whichever
     /// comes first — so the §3.6 remote pickup keeps working.
+    /// K8/L6: one code path for starting at a requested speed — used by
+    /// ApiCmd::Start and by a speed-set while paused (the belt starts on
+    /// SetSpeed but loses the speed). Arms the start-speed reassertion.
+    fn start_at(&mut self, v: f64) -> Result<(), ApiErr> {
+        self.idle_since = Some(tokio::time::Instant::now());
+        self.pending_start_speed = Some(v);
+        self.queue_back(WireCmd::Start(v))
+    }
+
     fn correct_start_speed(&mut self, st: &p::Status, belt: State) {
         let Some(v) = self.pending_start_speed else {
             return;

@@ -16,6 +16,14 @@ the treadmill silently ignores Write Commands.
 - Plasma 6 widget (`it.lapo.pitpat`) for the panel with popup controls.
 - `pitpat` CLI for scripting and KDE global shortcuts (see below).
 
+## States
+
+The API, `--json` output, metrics and `sessions.jsonl` use the machine
+ids (`running`, `starting`, `paused`, `stopped`, `sleeping`,
+`disconnected`). Human-facing text (web page, widget, CLI without
+`--json`) says **walking** for `running`, `starting…`, `paused`,
+`stopped`, **asleep** for `sleeping`, and calls a session a **walk**.
+
 ## Idle sleep (on-demand connection)
 
 The treadmill beeps on every BLE connect and keeps its LCD lit, so the daemon does not hold the

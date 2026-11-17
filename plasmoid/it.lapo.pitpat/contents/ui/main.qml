@@ -132,7 +132,7 @@ PlasmoidItem {
                 root.lastMilestone = n;
                 root.notify(
                     i18n("PitPat milestone %1", n),
-                    i18n("You walked %1 km in this walk!", (n * root.milestoneKm).toFixed(2))
+                    i18n("You've walked %1 km!", (n * root.milestoneKm).toFixed(2))
                 );
             }
         }
@@ -165,7 +165,7 @@ PlasmoidItem {
                 : i18n("pitpat daemon not running");
         const ses = next.session
             ? i18nc("tooltip", "walk: %1 km", (next.session.distance_m / 1000).toFixed(2))
-            : i18nc("tooltip empty", "no walks yet");
+            : i18nc("tooltip empty", "not walking");
         const today = next.today
             ? i18nc("tooltip", "today: %1 km", (next.today.distance_m / 1000).toFixed(2))
             : "";

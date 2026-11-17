@@ -28,6 +28,29 @@ Item {
     readonly property bool ctlEnabled: reachable && !root.busy && snap.state !== "starting"
 
     property var lastSessions: []
+    // K5: fetch sessions only when the popup opens, when a walk starts or
+    // ends (the last_end_reason / session-start key changes), and once a
+    // minute otherwise — not on every 1 s snapshot
+    property string lastSessionKey: ""
+    property string lastEndKey: ""
+    property bool lastFetchMinute: false
+    property var snapArrival: new Date()
+
+    function sessionKeyChanged() {
+        const start = snap.session ? snap.session.start : "";
+        const end = snap.last_end_reason || "";
+        if (start !== lastSessionKey || end !== lastEndKey) {
+            lastSessionKey = start;
+            lastEndKey = end;
+            return true;
+        }
+        const now = new Date();
+        if (now - snapArrival > 60000) {
+            snapArrival = now;
+            return lastFetchMinute;
+        }
+        return false;
+    }
 
     // F4: a counter still at 0 after ~50 m of walking is treated as
     // "not reported by this treadmill" and hidden
@@ -39,7 +62,15 @@ Item {
     implicitWidth: Kirigami.Units.gridUnit * 18
     implicitHeight: Kirigami.Units.gridUnit * 22
 
-    onSnapChanged: refreshSessions()
+    onSnapChanged: {
+        const d = new Date();
+        if (lastFetchMinute === false) {
+            lastFetchMinute = true;
+        } else if (d.getSeconds() !== snapArrival.getSeconds()) {
+            snapArrival = snapArrival; // keep the reference date stable
+        }
+        refreshSessions();
+    }
 
     function refreshSessions() {
         var xhr = new XMLHttpRequest();

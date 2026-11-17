@@ -28,6 +28,9 @@ Item {
     readonly property bool ctlEnabled: reachable && !root.busy && snap.state !== "starting"
 
     property var lastSessions: []
+    // K4/L1: the Target section; opens by default when a target is set
+    property bool targetOpen: snap.target
+        && (snap.target.distance_m || snap.target.duration_s) ? true : false
     // K5: fetch sessions only when the popup opens, when a walk starts or
     // ends (the last_end_reason / session-start key changes), and once a
     // minute otherwise — not on every 1 s snapshot
@@ -59,30 +62,7 @@ Item {
         return !ses || (v === 0 && ses.distance_m > 50);
     }
 
-    // K4: one formatter per field so the popup and the panel agree
-    function fmtDistance(km) { return Number(km).toFixed(2) + " km"; }
-    function fmtSpeed(kmh) { return Number(kmh).toFixed(1) + " km/h"; }
-    function fmtTime(sec) {
-        const s = Math.round(sec);
-        const h = Math.floor(s / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        const r = s % 60;
-        return h > 0
-            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
-            : m + ":" + String(r).padStart(2, "0");
-    }
-    // K3: same labels as the panel tooltip
-    function stateLabel(state) {
-        switch (state) {
-            case "running": return i18n("walking");
-            case "starting": return i18n("starting…");
-            case "paused": return i18n("paused");
-            case "stopped": return i18n("stopped");
-            case "sleeping": return i18n("asleep");
-            case "disconnected": return i18n("disconnected");
-            default: return state;
-        }
-    }
+
 
     implicitWidth: Kirigami.Units.gridUnit * 18
     implicitHeight: Kirigami.Units.gridUnit * 22
@@ -175,11 +155,11 @@ Item {
             }
             Kirigami.Heading {
                 level: 3
-                text: full.onMove ? fmtTime(full.snap.session.duration_s) : "–"
+                text: full.snap.session ? fmtTime(full.snap.session.duration_s) : "–"
             }
             Kirigami.Heading {
                 level: 3
-                text: full.onMove ? fmtSpeed(full.snap.speed_kmh) : "–"
+                text: fmtSpeed(full.snap.speed_kmh)
             }
         }
 
@@ -307,25 +287,10 @@ Item {
             }
         }
 
-        // stop: visually distinct, always reachable while working (§9)
-        PlasmaComponents3.Button {
-            enabled: full.reachable && !root.busy && full.snap.state !== "stopped"
-            onClicked: root.stop()
-            text: i18n("Stop")
-            icon.name: "media-playback-stop"
-            Layout.fillWidth: true
-            Kirigami.Theme.colorSet: Kirigami.Theme.Selection
-            palette {
-                button: "#c0392b"
-                buttonText: "#ffffff"
-            }
-        }
-
         // K4: target section, collapsed by default
-        property bool targetOpen: false
         PlasmaComponents3.ToolButton {
             id: targetToggle
-            text: targetOpen
+            text: full.targetOpen
                 ? i18n("Target ▾")
                 : i18n("Target ▸")
             icon.name: "flag-red"

@@ -623,10 +623,6 @@ impl Core {
                 .bump_totals(d.distance_m, d.steps, u32::from(d.kcal), d.moving_s);
         }
 
-        // K7: a frame without a steps value keeps the last seen count
-        let steps = st.steps.unwrap_or(self.last_steps.unwrap_or(0));
-        self.last_steps = Some(steps);
-
         let belt = State::from(st.belt_state());
         self.correct_start_speed(&st, belt);
         self.late_credit(&st, steps, belt);
@@ -806,12 +802,19 @@ impl Core {
         let Some(s) = self.session.as_mut() else {
             return;
         };
-        if st.distance_m < s.distance_m || steps < s.steps {
+        // L5/K7: the counters reset together on this model. A drop in
+        // distance or duration is a real reset (freeze the old values);
+        // a lone steps drop with distance/duration still growing is a
+        // stale carry-over — re-baseline steps without an offset.
+        if st.distance_m < s.distance_m || st.duration_s < s.duration_s {
             self.session_offset.distance_m += s.distance_m;
             self.session_offset.steps += s.steps;
             self.session_offset.kcal += s.kcal;
             self.session_offset.duration_s += s.duration_s;
         }
+        // a lone steps drop (stale carry-over from the previous walk):
+        // mirror the fresh value without touching the offset — the stale
+        // steps were never part of this session
         s.distance_m = st.distance_m;
         s.steps = steps;
         s.kcal = st.kcal;
@@ -1557,6 +1560,41 @@ mod tests {
         dur: f64,
     ) -> Vec<u8> {
         p::encode_status(belt, false, speed, target, dist, steps, kcal, dur).to_vec()
+    }
+
+    /// L5: a real 52-byte `68 34` connect frame — same fields, ASCII
+    /// junk in the tail, no steps value (K7).
+    fn st_connect_frame(
+        belt: p::BeltState,
+        speed: f64,
+        target: f64,
+        dist: u32,
+        kcal: u16,
+        dur: f64,
+    ) -> Vec<u8> {
+        let mut p = [0x00u8; 52];
+        p[0] = 0x68;
+        p[1] = 0x34;
+        let spd = (speed * 1000.0) as u16;
+        p[3] = (spd >> 8) as u8;
+        p[4] = spd as u8;
+        let tgt = (target * 1000.0) as u16;
+        p[5] = (tgt >> 8) as u8;
+        p[6] = tgt as u8;
+        p[7..11].copy_from_slice(&dist.to_be_bytes());
+        p[18] = (kcal >> 8) as u8;
+        p[19] = kcal as u8;
+        p[20..24].copy_from_slice(&((dur * 1000.0) as u32).to_be_bytes());
+        p[26] = match belt {
+            p::BeltState::Starting => 0x18,
+            p::BeltState::Running => 0x08,
+            p::BeltState::Paused => 0x10,
+            p::BeltState::Stopped => 0x00,
+        };
+        // ASCII junk such as a device serial, bytes 40..47
+        p[40..47].copy_from_slice(b"SN12345");
+        p[51] = 0x43;
+        p.to_vec()
     }
 
     fn tmpdir(name: &str) -> std::path::PathBuf {
@@ -2586,7 +2624,7 @@ mod tests {
         assert_eq!(recs[0].end_reason, "disconnected");
     }
 
-    /// K7: the connect frame (`68 34`) has no steps value; the running
+    /// K7/L5: the connect frame (`68 34`) has no steps value; the running
     /// `68 32` frame does. The core keeps the last count across frames
     /// without one, and a missing value must not trip the counter-reset
     /// path (a drop to 0 would re-add the old count as an offset).
@@ -2596,10 +2634,12 @@ mod tests {
         let mut t = mkcore(&dir);
         let c = &mut t.core;
         c.begin_connection(None);
-        // 52-byte 68 34 connect frame: steps = None
-        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        // the connect frame yields steps: None
+        let frame = st_connect_frame(p::BeltState::Stopped, 0.0, 0.0, 0, 0, 0.0);
+        assert_eq!(p::decode_status(&frame).unwrap().steps, None);
+        c.on_packet(&frame);
         c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0));
-        // running 68 32 frame carries 268 steps (the previous walk's end)
+        // a running 68 32 frame carries 268 steps (the previous walk's end)
         let mut with_steps = st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0);
         with_steps[1] = 0x32;
         with_steps[43] = 1;
@@ -2607,19 +2647,52 @@ mod tests {
         c.on_packet(&with_steps);
         let ses = c.snapshot().session.expect("session open");
         assert_eq!(ses.steps, 268, "steps from u16 @43");
+        // a short frame also yields steps: None
+        let short = with_steps[..31].to_vec();
+        assert_eq!(p::decode_status(&short).unwrap().steps, None);
         // a follow-up 68 34 frame keeps the last value, no reset trip
-        c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 5, 0, 0, 1.0));
+        let frame = st_connect_frame(p::BeltState::Running, 2.0, 2.0, 5, 0, 1.0);
+        assert_eq!(p::decode_status(&frame).unwrap().steps, None);
+        c.on_packet(&frame);
         assert_eq!(
             c.snapshot().session.as_ref().unwrap().steps,
             268,
             "missing steps value keeps the last count"
         );
-        // stop resets the counters: the next running frame drops to 0 and
-        // the new session must not gain the old 268
+        // stop resets the counters: the first running frame of the new
+        // walk still says 268 and the next one drops to 0 — a lone steps
+        // drop with distance/duration growing is a stale carry-over, not
+        // a reset, so the new session must not gain the old 268 (L5)
         c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
         c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0));
-        let fresh = c.snapshot().session.expect("new session");
-        assert_eq!(fresh.steps, 0, "the stale steps are not carried over");
+        let mut stale = st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.5);
+        stale[1] = 0x32;
+        stale[43] = 1;
+        stale[44] = 12; // still 268
+        c.on_packet(&stale);
+        assert_eq!(
+            c.snapshot().session.as_ref().unwrap().steps,
+            268,
+            "the stale steps are shown until the fresh value arrives"
+        );
+        let mut fresh = st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 1.0);
+        fresh[1] = 0x32;
+        fresh[43] = 0;
+        fresh[44] = 0; // the treadmill reset steps by the next frame
+        c.on_packet(&fresh);
+        assert_eq!(
+            c.snapshot().session.as_ref().unwrap().steps,
+            0,
+            "re-baselined without adding the old 268 as an offset"
+        );
+        assert_eq!(c.session_offset.steps, 0, "no offset inflation");
+        // the totals never double-count: a reconnect re-baselines the
+        // deltas (§4.4), so the stale 268 belongs to the old session
+        assert_eq!(
+            c.snapshot().session.as_ref().unwrap().steps,
+            0,
+            "the fresh value is mirrored"
+        );
     }
 
     /// G2 end-to-end: sleeping → the user picks 2.5 → Start → the belt

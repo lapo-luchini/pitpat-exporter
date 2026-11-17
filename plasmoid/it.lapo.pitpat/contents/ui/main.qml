@@ -15,6 +15,19 @@ PlasmoidItem {
 
     // ------------------------------------------------------------ state
     readonly property string apiBase: Plasmoid.configuration.daemonUrl
+    // K3/K4: one formatter set per UI, shared by both representations
+    function fmtDistance(km) { return Number(km).toFixed(2) + " km"; }
+    function fmtSpeed(kmh) { return Number(kmh).toFixed(1) + " km/h"; }
+    function fmtTime(sec) {
+        const s = Math.round(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = s % 60;
+        return h > 0
+            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
+            : m + ":" + String(r).padStart(2, "0");
+    }
+
     // K3: machine ids stay as-is in the API; only human text maps them
     function stateLabel(state) {
         switch (state) {

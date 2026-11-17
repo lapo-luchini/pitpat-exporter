@@ -450,7 +450,7 @@ mod tests {
         let pkt = c.recv_notification().await.unwrap();
         let st = crate::protocol::decode_status(&pkt).unwrap();
         assert_eq!(st.distance_m, 0);
-        assert_eq!(st.steps, 0);
+        assert_eq!(st.steps, Some(0));
         assert_eq!(st.kcal, 0);
     }
 

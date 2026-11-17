@@ -64,8 +64,9 @@ pub struct Status {
     pub target_speed_kmh: f64,
     /// Session distance in metres.
     pub distance_m: u32,
-    /// Session step count.
-    pub steps: u32,
+    /// Session step count; `None` when the frame carries no steps value
+    /// (K7: u16 @43 in 50-byte `68 32` frames only).
+    pub steps: Option<u32>,
     /// Session energy in kcal.
     pub kcal: u16,
     /// Session (moving) duration in seconds.
@@ -107,6 +108,14 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
         return None;
     }
     let be16 = |i: usize| u16::from_be_bytes([pkt[i], pkt[i + 1]]);
+    // K7: steps live at u16 @43, but only in the 50-byte `68 32` frames
+    // the treadmill sends while the belt runs. The 52-byte `68 34` frame
+    // right after connect has an ASCII serial in its tail: no steps value.
+    let steps = if pkt.len() >= 45 && pkt[1] == 0x32 {
+        Some(u32::from(be16(43)))
+    } else {
+        None
+    };
     let be32 = |i: usize| u32::from_be_bytes([pkt[i], pkt[i + 1], pkt[i + 2], pkt[i + 3]]);
 
     let flags = pkt[26];
@@ -135,7 +144,7 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
         speed_mps,
         target_speed_kmh,
         distance_m,
-        steps: be32(14),
+        steps,
         kcal: be16(18),
         duration_s: (be32(20) as f64 / 1000.0),
         flags,
@@ -153,8 +162,11 @@ pub fn encode_status(
     steps: u32,
     kcal: u16,
     duration_s: f64,
-) -> [u8; 31] {
-    let mut p = [0x00; 31];
+) -> [u8; 50] {
+    // K7: a 50-byte `68 32` frame, the kind that carries the step counter
+    let mut p = [0x00; 50];
+    p[0] = 0x68;
+    p[1] = 0x32;
     let speed = (if imperial {
         speed_kmh / 1.609344 * 1000.0
     } else {
@@ -180,7 +192,9 @@ pub fn encode_status(
     p[5] = (target >> 8) as u8;
     p[6] = target as u8;
     p[7..11].copy_from_slice(&dist.to_be_bytes());
-    p[14..18].copy_from_slice(&steps.to_be_bytes());
+    // K7: steps live at u16 @43 in these frames (bytes 43..45, BE)
+    p[43] = (steps >> 8) as u8;
+    p[44] = steps as u8;
     p[18] = (kcal >> 8) as u8;
     p[19] = kcal as u8;
     p[20..24].copy_from_slice(&((duration_s * 1000.0) as u32).to_be_bytes());
@@ -191,6 +205,7 @@ pub fn encode_status(
             BeltState::Paused => 0x10,
             BeltState::Stopped => 0x00,
         };
+    p[49] = 0x43; // end byte
     p
 }
 
@@ -247,7 +262,7 @@ mod tests {
             assert!(!s.imperial());
             assert!((s.speed_mps - 3.2 / 3.6).abs() < 1e-9);
             assert_eq!(s.distance_m, 1234);
-            assert_eq!(s.steps, 1700);
+            assert_eq!(s.steps, Some(1700));
             assert_eq!(s.kcal, 52);
             assert!((s.duration_s - 1403.5).abs() < 1e-9);
         }

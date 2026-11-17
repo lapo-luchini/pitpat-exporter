@@ -219,6 +219,10 @@ pub struct Core {
     pending_start_speed: Option<f64>,
     settle_suppress_until: Option<tokio::time::Instant>,
     start_correct_tries: u8,
+    /// K7: the last reported step count — frames without a steps value
+    /// (the 52-byte `68 34` connect frame) keep it, so the counter-reset
+    /// path never trips on a missing value.
+    last_steps: Option<u32>,
     /// H1: when the last corrective SetSpeed went out.
     last_start_correct: Option<tokio::time::Instant>,
     imperial: bool,
@@ -268,6 +272,7 @@ impl Core {
             pending_start_speed: None,
             settle_suppress_until: None,
             start_correct_tries: 0,
+            last_steps: None,
             last_start_correct: None,
             imperial: false,
             speed_kmh: 0.0,
@@ -544,10 +549,15 @@ impl Core {
         self.imperial = st.imperial();
         self.speed_kmh = st.speed_mps * 3.6;
 
+        // K7: a frame without a steps value (the 52-byte `68 34` connect
+        // frame) keeps the last seen count, so no counter-reset trip
+        let steps = st.steps.unwrap_or(self.last_steps.unwrap_or(0));
+        self.last_steps = Some(steps);
+
         // lifetime totals via deltas (§4.4)
         if let Some(d) = self.deltas.apply(crate::session::Counters {
             distance_m: st.distance_m,
-            steps: st.steps,
+            steps,
             kcal: st.kcal,
             duration_s: st.duration_s,
         }) {
@@ -559,14 +569,18 @@ impl Core {
                 .bump_totals(d.distance_m, d.steps, u32::from(d.kcal), d.moving_s);
         }
 
+        // K7: a frame without a steps value keeps the last seen count
+        let steps = st.steps.unwrap_or(self.last_steps.unwrap_or(0));
+        self.last_steps = Some(steps);
+
         let belt = State::from(st.belt_state());
         self.correct_start_speed(&st, belt);
-        self.late_credit(&st, belt);
+        self.late_credit(&st, steps, belt);
         self.begin_session_if_needed(belt);
         if belt != State::Stopped {
             // a Stopped packet carries the treadmill's post-reset counters
             // (back to 0 on stop): keep the session's last values instead
-            self.update_running_session(&st);
+            self.update_running_session(&st, steps);
         }
         self.sync_target_speed(belt);
         self.state = belt;
@@ -662,7 +676,7 @@ impl Core {
     /// belt the daemon never saw being started (remote start): credit its
     /// counters to the lifetime totals once (capped), and seed the session
     /// that is about to open with them.
-    fn late_credit(&mut self, st: &p::Status, belt: State) {
+    fn late_credit(&mut self, st: &p::Status, steps: u32, belt: State) {
         if !self.expect_late_credit || self.session.is_some() {
             return;
         }
@@ -672,14 +686,14 @@ impl Core {
         }
         let capped = SessionCounters {
             distance_m: st.distance_m.min(LATE_CREDIT_MAX_M),
-            steps: st.steps.min(LATE_CREDIT_MAX_STEPS),
+            steps: steps.min(LATE_CREDIT_MAX_STEPS),
             kcal: st.kcal,
             duration_s: st.duration_s,
         };
-        if capped.distance_m < st.distance_m || capped.steps < st.steps {
+        if capped.distance_m < st.distance_m || capped.steps < steps {
             tracing::warn!(
                 distance_m = st.distance_m,
-                steps = st.steps,
+                steps = capped.steps,
                 "late-connect counters exceed the cap, clamped"
             );
         }
@@ -734,18 +748,18 @@ impl Core {
     /// Mirror the treadmill's session counters; when it resets them
     /// mid-session, what was walked before the reset is kept as an
     /// offset and added back into the record at the end (§4.3).
-    fn update_running_session(&mut self, st: &p::Status) {
+    fn update_running_session(&mut self, st: &p::Status, steps: u32) {
         let Some(s) = self.session.as_mut() else {
             return;
         };
-        if st.distance_m < s.distance_m || st.steps < s.steps {
+        if st.distance_m < s.distance_m || steps < s.steps {
             self.session_offset.distance_m += s.distance_m;
             self.session_offset.steps += s.steps;
             self.session_offset.kcal += s.kcal;
             self.session_offset.duration_s += s.duration_s;
         }
         s.distance_m = st.distance_m;
-        s.steps = st.steps;
+        s.steps = steps;
         s.kcal = st.kcal;
         s.duration_s = st.duration_s;
         s.max_speed_kmh = s.max_speed_kmh.max(self.speed_kmh);
@@ -2433,6 +2447,42 @@ mod tests {
                 let _ = connects.load(std::sync::atomic::Ordering::Relaxed);
             })
             .await;
+    }
+
+    /// K7: the connect frame (`68 34`) has no steps value; the running
+    /// `68 32` frame does. The core keeps the last count across frames
+    /// without one, and a missing value must not trip the counter-reset
+    /// path (a drop to 0 would re-add the old count as an offset).
+    #[test]
+    fn steps_frame_kinds_and_stale_steps() {
+        let dir = tmpdir("steps43");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        // 52-byte 68 34 connect frame: steps = None
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0));
+        // running 68 32 frame carries 268 steps (the previous walk's end)
+        let mut with_steps = st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0);
+        with_steps[1] = 0x32;
+        with_steps[43] = 1;
+        with_steps[44] = 12; // 268
+        c.on_packet(&with_steps);
+        let ses = c.snapshot().session.expect("session open");
+        assert_eq!(ses.steps, 268, "steps from u16 @43");
+        // a follow-up 68 34 frame keeps the last value, no reset trip
+        c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 5, 0, 0, 1.0));
+        assert_eq!(
+            c.snapshot().session.as_ref().unwrap().steps,
+            268,
+            "missing steps value keeps the last count"
+        );
+        // stop resets the counters: the next running frame drops to 0 and
+        // the new session must not gain the old 268
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 0, 0, 0, 0.0));
+        c.on_packet(&st_target(p::BeltState::Running, 2.0, 2.0, 0, 0, 0, 0.0));
+        let fresh = c.snapshot().session.expect("new session");
+        assert_eq!(fresh.steps, 0, "the stale steps are not carried over");
     }
 
     /// G2 end-to-end: sleeping → the user picks 2.5 → Start → the belt

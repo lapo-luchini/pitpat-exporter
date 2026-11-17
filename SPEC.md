@@ -122,10 +122,14 @@ All integers are **big-endian, unsigned**. Offsets are byte indices:
 | current speed | 3 | u16 | speed × 1000 (km/h or mph, see unit flag) |
 | target speed | 5 | u16 | the treadmill's own target, × 1000, same unit |
 | distance | 7 | u32 | distance × 1000 (km or mi) → in km mode, **metres** |
-| steps | 14 | u32 | step count, current session |
 | calories | 18 | u16 | kcal, current session |
 | duration | 20 | u32 | milliseconds, current session |
 | flags | 26 | u8 | see below |
+| steps | 43 | u16 | step count, current session — 50-byte `68 32` frames only |
+
+Bytes 14–17 are unused on the model seen on hardware. The frame right
+after connect is a 52-byte `68 34` variant with an ASCII serial in its
+tail and **no steps value**: the daemon keeps the last count it saw.
 
 Flags byte:
 - bit 7 (`0x80`): 1 = imperial (mph / mi), 0 = metric.
@@ -136,16 +140,15 @@ Normalise everything to SI internally: speed in m/s, distance in metres
 
 Hardware note (the 52-byte variant seen on real hardware, C4:A9:B8:…):
 the frame starts `68 34` and is 52 bytes long, but the field offsets
-above are unchanged and the values decoded correctly. Bytes 11–19
-(steps @14 and kcal @18) were all zero at ~1 km/h even after ~30 s and
-some metres of walking; the user later confirmed kcal IS reported
-correctly (so kcal @18 is right), while steps stayed 0 — likely not
-counted at low speeds. The
-UI hides a counter that is still 0 while the session distance exceeds
-~50 m ("not reported"); metrics and sessions.jsonl keep 0, which is
-the truthful value. The tail carries what looks like a device serial.
-Don't guess extra offsets from short traces; a longer debug trace at a
-normal walking speed may reveal the real locations.
+above are unchanged and the values decoded correctly. Steps were read
+from the wrong offset until a Nov 17 hardware trace pinned them at
+u16 @43 of the 50-byte `68 32` frame (see the table): the counter
+climbs with actual footfalls (86 steps counted vs 86 reported, long
+steps 65 vs 66), but very short, light steps are under-counted (114
+counted vs 77) — the daemon reports the device value as is. kcal @18
+is correct. After a stop the treadmill may reset duration and kcal to
+0 while distance drops first; steps behaved inconsistently between
+traces (staying at 268 once, resetting the other time).
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
 

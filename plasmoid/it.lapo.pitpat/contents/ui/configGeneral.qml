@@ -17,6 +17,9 @@ KCM.SimpleKCM {
     property string cfg_daemonUrl: ""
     property string cfg_token: ""
     property real cfg_milestoneKm: 1.0
+    property string cfg_line1: "distance"
+    property string cfg_line2: "time"
+    property string cfg_line3: "speed"
 
     Kirigami.FormLayout {
         QQC.TextField {
@@ -54,6 +57,32 @@ KCM.SimpleKCM {
             visible: true
             type: Kirigami.MessageType.Information
             text: i18n("The token is only needed for non-loopback daemons.")
+        }
+        // K2: panel line order (thickness still picks how many lines show)
+        QQC.ComboBox {
+            id: line1Box
+            model: ["distance", "time", "speed"]
+            textRole: "modelData"
+            displayText: currentText
+            currentIndex: model.indexOf(general.cfg_line1)
+            onActivated: general.cfg_line1 = currentText
+            Kirigami.FormData.label: i18n("Panel line 1:")
+        }
+        QQC.ComboBox {
+            model: ["distance", "time", "speed", "none"]
+            textRole: "modelData"
+            displayText: currentText
+            currentIndex: model.indexOf(general.cfg_line2)
+            onActivated: general.cfg_line2 = currentText
+            Kirigami.FormData.label: i18n("Panel line 2:")
+        }
+        QQC.ComboBox {
+            model: ["distance", "time", "speed", "none"]
+            textRole: "modelData"
+            displayText: currentText
+            currentIndex: model.indexOf(general.cfg_line3)
+            onActivated: general.cfg_line3 = currentText
+            Kirigami.FormData.label: i18n("Panel line 3:")
         }
     }
 }

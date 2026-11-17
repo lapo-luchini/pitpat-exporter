@@ -42,6 +42,32 @@ Item {
     // H2: a thin panel still shows the distance — the user asked for it
     readonly property bool showDistance: onMove && !vertical
 
+    // K2: configurable line order; the thickness still picks how many
+    // lines show. Values: distance | time | speed | none (lines 2/3).
+    readonly property var lineOrder: [
+        Plasmoid.configuration.line1 || "distance",
+        Plasmoid.configuration.line2 || "none",
+        Plasmoid.configuration.line3 || "none",
+    ]
+    readonly property var lineTexts: {
+        const ses = root.snap.session;
+        const dist = compact.sessionKm.toFixed(2) + " km";
+        const time = ses ? fmtTime(ses.duration_s) : "–";
+        const speed = root.snap.speed_kmh.toFixed(1) + " km/h";
+        return { distance: dist, time: time, speed: speed };
+    }
+    // the visible lines, `none` skipped without leaving gaps
+    readonly property var visibleLines: {
+        const n = compact.lines === 0 ? 1 : Math.min(compact.lines, 3);
+        const out = [];
+        for (const l of lineOrder) {
+            if (l !== "none" && out.length < n) {
+                out.push(l);
+            }
+        }
+        return out;
+    }
+
     Kirigami.Icon {
         id: icon
         source: "run-build"
@@ -63,12 +89,14 @@ Item {
 
     Text {
         id: singleLine
-        // thin panel: distance only; one-line mode: `1.23 km · 2.5 km/h`
-        visible: compact.showDistance && compact.lines <= 1
-        text: compact.lines === 0
-            ? compact.sessionKm.toFixed(2) + " km"
-            : compact.sessionKm.toFixed(2) + " km · "
-                + root.snap.speed_kmh.toFixed(1) + " km/h"
+        // K2: joined with ` · ` (line 1 only if line 2 is none)
+        visible: compact.showDistance && compact.visibleLines.length >= 1
+            && compact.visibleLines.length <= 2
+        text: {
+            const t = compact.lineTexts;
+            const parts = compact.visibleLines.map(function (l) { return t[l]; });
+            return parts.join(" · ");
+        }
         color: Kirigami.Theme.textColor
         font.pixelSize: icon.height / 2.4
         anchors {
@@ -80,8 +108,8 @@ Item {
 
     Column {
         id: textCol
-        // multi-line modes
-        visible: compact.onMove && compact.lines >= 2
+        // K2: multi-line modes render the configured lines in order
+        visible: compact.showDistance && compact.visibleLines.length >= 2
         spacing: 0
         anchors {
             left: icon.right
@@ -89,34 +117,17 @@ Item {
             leftMargin: Kirigami.Units.smallSpacing
         }
 
-        Text {
-            // distance first and larger
-            text: compact.sessionKm.toFixed(2) + " km"
-            color: Kirigami.Theme.textColor
-            font.pixelSize: icon.height / 2.2
-            font.bold: true
-        }
-
-        Text {
-            text: root.snap.speed_kmh.toFixed(1) + " km/h"
-            color: Kirigami.Theme.textColor
-            font.pixelSize: icon.height / 3.0
-        }
-
-        Text {
-            visible: compact.lines >= 3
-            text: {
-                const ses = root.snap.session;
-                const s = Math.round(ses.duration_s);
-                const h = Math.floor(s / 3600);
-                const m = Math.floor((s % 3600) / 60);
-                const r = s % 60;
-                return h > 0
-                    ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
-                    : m + ":" + String(r).padStart(2, "0");
+        Repeater {
+            model: compact.visibleLines
+            Text {
+                required property string modelData
+                text: compact.lineTexts[modelData]
+                color: index === 0 ? Kirigami.Theme.textColor
+                    : index === 1 ? Kirigami.Theme.textColor
+                    : Kirigami.Theme.disabledTextColor
+                font.pixelSize: index === 0 ? icon.height / 2.2 : icon.height / 3.0
+                font.bold: index === 0
             }
-            color: Kirigami.Theme.disabledTextColor
-            font.pixelSize: icon.height / 3.4
         }
     }
 
@@ -144,6 +155,17 @@ Item {
     // J2: no minimumHeight for horizontal panels — the thickness is the
     // user's choice, and forcing 2 gridUnit would hide the thin-panel
     // distance line (H2).
+
+    // K2: shared formatters (K4 keeps its own copy in the popup)
+    function fmtTime(sec) {
+        const s = Math.round(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = s % 60;
+        return h > 0
+            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
+            : m + ":" + String(r).padStart(2, "0");
+    }
 
     // touchpad gestures send many small angleDelta events: accumulate and
     // step once per ±120 (REVIEW round-2 A6)

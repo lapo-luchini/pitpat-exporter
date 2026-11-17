@@ -12,6 +12,18 @@
             <label>API bearer token, only needed for non-loopback daemons</label>
             <default></default>
         </entry>
+        <entry name="line1" type="String">
+            <label>Panel line 1: distance, time or speed</label>
+            <default>distance</default>
+        </entry>
+        <entry name="line2" type="String">
+            <label>Panel line 2: distance, time, speed or none</label>
+            <default>time</default>
+        </entry>
+        <entry name="line3" type="String">
+            <label>Panel line 3: distance, time, speed or none</label>
+            <default>speed</default>
+        </entry>
         <entry name="pin" type="Bool">
             <label>Keep the popup open when clicking elsewhere</label>
             <default>false</default>

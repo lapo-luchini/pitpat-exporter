@@ -15,6 +15,19 @@ PlasmoidItem {
 
     // ------------------------------------------------------------ state
     readonly property string apiBase: Plasmoid.configuration.daemonUrl
+    // K3: machine ids stay as-is in the API; only human text maps them
+    function stateLabel(state) {
+        switch (state) {
+            case "running": return i18n("walking");
+            case "starting": return i18n("starting…");
+            case "paused": return i18n("paused");
+            case "stopped": return i18n("stopped");
+            case "sleeping": return i18n("asleep");
+            case "disconnected": return i18n("disconnected");
+            default: return state;
+        }
+    }
+
     readonly property string token: Plasmoid.configuration.token || ""
     readonly property real milestoneKm: Plasmoid.configuration.milestoneKm || 0
     // snap starts as a disconnected stub so the representations can bind
@@ -106,7 +119,7 @@ PlasmoidItem {
                 root.lastMilestone = n;
                 root.notify(
                     i18n("PitPat milestone %1", n),
-                    i18n("You walked %1 km in this session!", (n * root.milestoneKm).toFixed(2))
+                    i18n("You walked %1 km in this walk!", (n * root.milestoneKm).toFixed(2))
                 );
             }
         }
@@ -132,13 +145,14 @@ PlasmoidItem {
 
         // Plasma tooltip (§10): state, speed, session distance, today
         toolTipMainText = next.connected
-            ? i18nc("tooltip head", "%1 · %2 km/h", next.state, next.speed_kmh.toFixed(1))
+            ? i18nc("tooltip head", "%1 · %2 km/h",
+                    root.stateLabel(next.state), next.speed_kmh.toFixed(1))
             : next.state === "sleeping"
                 ? i18nc("tooltip head", "asleep")
                 : i18n("pitpat daemon not running");
         const ses = next.session
-            ? i18nc("tooltip", "session: %1 km", (next.session.distance_m / 1000).toFixed(2))
-            : i18nc("tooltip empty", "no open session");
+            ? i18nc("tooltip", "walk: %1 km", (next.session.distance_m / 1000).toFixed(2))
+            : i18nc("tooltip empty", "no walks yet");
         const today = next.today
             ? i18nc("tooltip", "today: %1 km", (next.today.distance_m / 1000).toFixed(2))
             : "";

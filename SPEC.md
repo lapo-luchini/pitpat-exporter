@@ -477,6 +477,12 @@ Meta+End → `pitpat stop`.
 
 ## 9. Built-in web page (`web/index.html`)
 
+UI labels (§9/§10): the machine ids (`running`, `starting`, `paused`,
+`stopped`, `sleeping`, `disconnected`) stay unchanged in the API, JSON
+output, metrics and sessions.jsonl; human-facing text says `walking`
+for `running`, `starting…`, `paused`, `stopped`, `asleep` for
+`sleeping`, and calls a session a "walk" ("this walk", "Last walks").
+
 - One self-contained file: inline CSS/JS, no frameworks, no external URLs. Target size < 15 KiB.
 - Mobile-friendly; follows `prefers-color-scheme`.
 - Shows: connection/state chip, big current speed, session distance / time / steps / kcal,

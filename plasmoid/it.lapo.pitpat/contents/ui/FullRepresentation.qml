@@ -304,7 +304,7 @@ Item {
 
         // last 3 sessions
         PlasmaComponents3.Label {
-            text: i18n("Last sessions")
+            text: i18n("Last walks")
             font.bold: true
         }
         ListView {
@@ -332,7 +332,7 @@ Item {
         }
         PlasmaComponents3.Label {
             visible: full.lastSessions.length === 0
-            text: full.working ? i18n("no sessions yet") : ""
+            text: full.working ? i18n("no walks yet") : ""
             color: Kirigami.Theme.disabledTextColor
         }
     }

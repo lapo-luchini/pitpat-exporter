@@ -150,9 +150,19 @@ pub fn status(api: &Api, json_out: bool) -> Result<String, CliError> {
         .and_then(|l| l.get("distance_m"))
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
+    // K3: human labels; --json keeps the machine ids
+    let label = match s {
+        "running" => "walking",
+        "starting" => "starting…",
+        "paused" => "paused",
+        "stopped" => "stopped",
+        "sleeping" => "asleep",
+        "disconnected" => "disconnected",
+        other => other,
+    };
     Ok(format!(
-        "{} speed={:.1} km/h session={:.2} km lifetime={:.1} km",
-        if conn { s } else { "disconnected" },
+        "{} speed={:.1} km/h walk={:.2} km lifetime={:.1} km",
+        if conn { label } else { "disconnected" },
         speed,
         dist / 1000.0,
         life / 1000.0,

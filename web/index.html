@@ -70,7 +70,9 @@ let last=null;
 function snap(s){
   last=s;const c=s.connected,st=s.state,ses=s.session,on=c&&st!=='stopped';
   const chip=$('chip');
-  chip.textContent=on?st:(st==='sleeping'?'asleep':'not connected');
+  // K3: human labels (the machine ids stay in the API/JSON)
+  const labels={running:'walking',starting:'starting…',paused:'paused',stopped:'stopped',sleeping:'asleep',disconnected:'disconnected'};
+  chip.textContent=on?(labels[st]||st):(st==='sleeping'?'asleep':'not connected');
   chip.style.color=st==='running'?'MediumSeaGreen':st==='paused'?'DarkGoldenrod':c?'':'Grey';
   $('spd').textContent=on?fmt(s.speed_kmh):'–';
   $('dist').textContent=ses?fmt(ses.distance_m):'–';

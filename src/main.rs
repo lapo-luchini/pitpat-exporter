@@ -288,7 +288,14 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
     // §4.5a + §4.1: the whole link policy (sleep/wake, reconnect
     // backoff, link-loss handling) lives in the supervisor, tested
     // against scripted links (REVIEW round-6 D2/D3)
-    core::supervise(core, link, ctrl_rx).await;
+    {
+        let mut core = core;
+        core.check_state_dir();
+        // §4.5a + §4.1: the whole link policy (sleep/wake, reconnect
+        // backoff, link-loss handling) lives in the supervisor, tested
+        // against scripted links (REVIEW round-6 D2/D3)
+        core::supervise(core, link, ctrl_rx).await;
+    }
 
     server.abort();
     bridge.abort();

@@ -53,6 +53,8 @@ pub struct Metrics {
     pub sessions_total: Counter,
     pub reconnects_total: Counter,
     pub invalid_packets_total: Counter,
+    /// K6: walks couldn't be saved (sessions.jsonl/totals.json failures).
+    pub persist_errors_total: Counter,
     registry: Registry,
 }
 
@@ -131,6 +133,10 @@ impl Metrics {
             "invalid_packets",
             "status notifications that failed to decode"
         );
+        let persist_errors_total = reg_c!(
+            "persist_errors",
+            "walks could not be saved (state dir/files not writable)"
+        );
 
         let bu: Family<BuildInfo, Gauge> = Family::default();
         bu.get_or_create(&BuildInfo {
@@ -157,6 +163,7 @@ impl Metrics {
             sessions_total,
             reconnects_total,
             invalid_packets_total,
+            persist_errors_total,
         }
     }
 

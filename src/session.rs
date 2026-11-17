@@ -48,6 +48,57 @@ pub fn is_noise(rec: &SessionRec) -> bool {
     rec.duration_s < 10.0 && rec.distance_m < 10
 }
 
+/// K6: startup check that the state dir is writable and that an existing
+/// `sessions.jsonl` opens for append. Returns the reason on failure so
+/// the daemon can surface it (`persist_ok`) and keep the record in
+/// memory until the file becomes writable again.
+pub fn check_state_dir_writable(dir: &Path) -> Result<(), String> {
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        return Err(format!(
+            "cannot create state dir {}: {err} (fix ownership, e.g. chown it to the service user)",
+            dir.display()
+        ));
+    }
+    let probe = dir.join(".pitpat-write-test");
+    if let Err(err) = std::fs::write(&probe, b"") {
+        return Err(format!(
+            "state dir {} not writable by uid {}: {err} (chown the dir/files to the service user)",
+            dir.display(),
+            getuid()
+        ));
+    }
+    let _ = std::fs::remove_file(&probe);
+    let path = dir.join("sessions.jsonl");
+    if path.exists() {
+        match std::fs::OpenOptions::new().append(true).open(&path) {
+            Ok(_) => {}
+            Err(err) => {
+                return Err(format!(
+                    "sessions.jsonl {} not appendable by uid {}: {err} (chown the files in {} to match the directory)",
+                    path.display(),
+                    getuid(),
+                    dir.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+// no libc dependency: read the uid from /proc/self
+fn getuid() -> u32 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|t| {
+            t.lines().find(|l| l.starts_with("Uid:")).and_then(|l| {
+                l.split_whitespace()
+                    .nth(1)
+                    .and_then(|x| x.parse::<u32>().ok())
+            })
+        })
+        .unwrap_or(0)
+}
+
 /// Append a record to `$STATE_DIR/sessions.jsonl`.
 pub fn append_session(dir: &Path, rec: &SessionRec) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;

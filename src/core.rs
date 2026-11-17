@@ -147,6 +147,8 @@ pub struct Snapshot {
     /// Why the last session ended (empty while a session is open); lets
     /// remote clients detect auto-stop transitions (§10 widgets).
     pub last_end_reason: Option<&'static str>,
+    /// K6: why walks can't be saved right now (None = saving works).
+    pub persist_error: Option<String>,
     /// Lifetime totals ride along for the state endpoint.
     pub totals: Totals,
 }
@@ -223,6 +225,11 @@ pub struct Core {
     /// (the 52-byte `68 34` connect frame) keep it, so the counter-reset
     /// path never trips on a missing value.
     last_steps: Option<u32>,
+    /// K6: session records held back because the file wasn't writable,
+    /// retried on the next persist (capped so a long outage can't grow it).
+    pending_records: Vec<crate::session::SessionRec>,
+    /// K6: why walks can't be saved right now (None = saving works).
+    persist_error: Option<String>,
     /// H1: when the last corrective SetSpeed went out.
     last_start_correct: Option<tokio::time::Instant>,
     imperial: bool,
@@ -273,6 +280,8 @@ impl Core {
             settle_suppress_until: None,
             start_correct_tries: 0,
             last_steps: None,
+            pending_records: Vec::new(),
+            persist_error: None,
             last_start_correct: None,
             imperial: false,
             speed_kmh: 0.0,
@@ -321,6 +330,7 @@ impl Core {
             session: self.reported_session(),
             target: self.target,
             last_end_reason: self.last_end_reason,
+            persist_error: self.persist_error.clone(),
             totals: self.totals.clone(),
         }
     }
@@ -347,9 +357,42 @@ impl Core {
         let _ = self.events.send(snap); // nobody listening is normal
     }
 
-    pub fn persist(&self) {
+    /// K6: run once at startup so a state dir the service can't write to
+    /// is reported loudly instead of silently losing walks.
+    pub fn check_state_dir(&mut self) {
+        if let Err(reason) = crate::session::check_state_dir_writable(&self.state_dir) {
+            tracing::error!("{reason}");
+            self.persist_error = Some(reason);
+        }
+    }
+
+    pub fn persist(&mut self) {
         if let Err(err) = crate::session::save_totals(&self.state_dir, &self.totals) {
             tracing::error!(error = %err, "persisting totals.json failed");
+            self.persist_error = Some(format!("totals.json: {err}"));
+            self.metrics.persist_errors_total.inc();
+            return;
+        }
+        self.persist_error = None;
+        // K6: retry any session records held back by an earlier failure
+        let held: Vec<_> = self.pending_records.drain(..).collect();
+        for rec in held {
+            match crate::session::append_session(&self.state_dir, &rec) {
+                Ok(()) => {
+                    self.totals.sessions += 1;
+                    self.metrics.sessions_total.inc();
+                    tracing::info!(distance_m = rec.distance_m, "held walk finally saved");
+                }
+                Err(_) => {
+                    // still failing: put it back and stop retrying
+                    self.pending_records.push(rec);
+                    self.persist_error = Some(
+                        "sessions.jsonl: still not writable (chown the files in the state dir)"
+                            .into(),
+                    );
+                    break;
+                }
+            }
         }
     }
 
@@ -880,10 +923,24 @@ impl Core {
             tracing::debug!("session under 10 s and under 10 m: discarded as noise");
             return;
         }
-        self.totals.sessions += 1;
-        self.metrics.sessions_total.inc();
-        if let Err(err) = crate::session::append_session(&self.state_dir, &rec) {
-            tracing::error!(error = %err, "appending session record failed");
+        match crate::session::append_session(&self.state_dir, &rec) {
+            Ok(()) => {
+                self.totals.sessions += 1;
+                self.metrics.sessions_total.inc();
+            }
+            Err(err) => {
+                // K6: keep the record and retry it on the next persist;
+                // the sessions counter increments only on the save
+                tracing::error!(error = %err, "appending session record failed; holding it in memory");
+                self.pending_records.push(rec);
+                if self.pending_records.len() > 100 {
+                    self.pending_records.remove(0);
+                }
+                self.persist_error = Some(format!(
+                    "sessions.jsonl: {err} (chown the files in the state dir)"
+                ));
+                self.metrics.persist_errors_total.inc();
+            }
         }
         self.persist();
     }
@@ -2478,6 +2535,55 @@ mod tests {
                 let _ = connects.load(std::sync::atomic::Ordering::Relaxed);
             })
             .await;
+    }
+
+    /// K6: a read-only sessions.jsonl is detected at startup, the record
+    /// is held in memory, and after the file becomes writable the next
+    /// persist appends it (no restart needed).
+    #[test]
+    fn persist_failure_holds_and_retries() {
+        let dir = tmpdir("k6");
+        std::fs::create_dir_all(&dir).unwrap();
+        // K6: make sessions.jsonl un-openable for append. Tests may run
+        // as root, where mode bits don't stop writes — replace it with a
+        // directory, which fails with EISDIR for everyone.
+        std::fs::remove_dir_all(dir.join("sessions.jsonl")).ok();
+        std::fs::create_dir_all(dir.join("sessions.jsonl")).unwrap();
+
+        let (events, _ev_rx) = tokio::sync::broadcast::channel(8);
+        let (_, api_rx) = mpsc::channel(8);
+        let mut core = Core::new(
+            cfg(),
+            Totals::default(),
+            Arc::new(Metrics::new()),
+            events,
+            api_rx,
+            dir.clone(),
+        );
+        core.check_state_dir();
+        assert!(core.persist_error.is_some(), "unopenable file reported");
+
+        // a session ends while the file can't be appended: held, not lost
+        core.begin_connection(None);
+        core.on_packet(&st(p::BeltState::Running, 2.0, 100, 140, 5, 100.0));
+        core.on_disconnect(DeadReason::Link);
+        assert!(
+            !core.pending_records.is_empty(),
+            "the record is held in memory"
+        );
+        // held records don't double-count sessions
+        assert_eq!(core.totals.sessions, 0, "counted on save, not on hold");
+
+        // fix it: replace the impostor directory with a real file
+        std::fs::remove_dir_all(dir.join("sessions.jsonl")).unwrap();
+        std::fs::write(dir.join("sessions.jsonl"), b"").unwrap();
+        core.persist();
+        assert!(core.pending_records.is_empty(), "retried and saved");
+        assert!(core.persist_error.is_none());
+        assert_eq!(core.totals.sessions, 1);
+        let recs = crate::session::read_sessions(&dir, 4);
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].end_reason, "disconnected");
     }
 
     /// K7: the connect frame (`68 34`) has no steps value; the running

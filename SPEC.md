@@ -168,7 +168,9 @@ traces (staying at 268 once, resetting the other time).
 | 22 | `0x43` end byte |
 
 For pause/stop, the speed field carries the current target speed (any valid value works; the
-reference sends 1000; we send the target speed, clamped).
+reference sends 1000; we send the target speed, clamped). A SetSpeed while paused starts the
+belt on this model but loses the speed (K8): the daemon sends a Start carrying the requested
+speed instead and re-asserts it afterwards (§3.6).
 
 ### 3.4 Golden test vectors (weight 80, default user ID)
 

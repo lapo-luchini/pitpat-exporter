@@ -41,6 +41,7 @@ input[type=range]{flex:1}
 <div class="cell"><div class="b" id="kcal">–</div><div class="lbl">kcal</div></div>
 </div>
 <div><span id="tgtlbl" class="lbl"></span><div class="bar"><div id="tgtbar"></div></div></div>
+<div class="row" id="persistwarn" style="display:none;color:Crimson"><span id="persistmsg" class="lbl"></span></div>
 <div class="row"><span class="lbl">today</span> <b id="today">–</b> · <span class="lbl">lifetime</span> <b id="life">–</b></div>
 <div class="row">
 <button id="tog" class="primary">Start</button>
@@ -108,6 +109,10 @@ async function slow(){
     $('today').textContent=(st.today.distance_m/1000).toFixed(2)+' km';
     $('life').textContent=(st.lifetime.distance_m/1000).toFixed(1)+' km';
     presets(st.presets_kmh);
+    // K6: walks not being saved must stay visible
+    const po=!st.persist_ok;
+    $('persistwarn').style.display=po?'':'none';
+    if(po)$('persistmsg').textContent='walks are not being saved: '+(st.persist_error||'unknown reason');
   }catch(e){}
 }
 

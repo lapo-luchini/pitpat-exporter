@@ -123,6 +123,15 @@ A plasmoid can't register several global shortcuts, so bind the CLI in
 | Meta+Down | `pitpat speed -0.1` |
 | Meta+End | `pitpat stop` |
 
+## Troubleshooting
+
+Walks not saved: the state dir may contain files left by a manual run
+as another user (`chown` the files in `/var/lib/pitpat` to match the
+directory). The daemon keeps the last walks in memory and saves them as
+soon as the files become writable; the web page and the widget show a
+warning while saving fails (`persist_ok: false` in `/api/state`,
+`pitpat_persist_errors_total`).
+
 ## Safety note about remote control
 
 The API can make the belt start moving on a machine someone may be standing on. Keep the

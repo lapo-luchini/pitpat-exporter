@@ -212,6 +212,8 @@ fn state_json(state: &AppState, s: &Snapshot) -> serde_json::Value {
             "duration_s": s.target.duration_s,
         },
         "last_end_reason": s.last_end_reason,
+        "persist_ok": s.persist_error.is_none(),
+        "persist_error": s.persist_error,
         "today": today,
         "lifetime": {
             "distance_m": t.distance_m,
@@ -292,6 +294,8 @@ fn snapshot_json(s: &Snapshot) -> serde_json::Value {
             "duration_s": s.target.duration_s,
         },
         "last_end_reason": s.last_end_reason,
+        "persist_ok": s.persist_error.is_none(),
+        "persist_error": s.persist_error,
         "imperial": s.imperial,
     })
 }
@@ -509,6 +513,7 @@ mod tests {
             session: None,
             target: Target::default(),
             last_end_reason: None,
+            persist_error: None,
             totals: Totals::default(),
         }
     }

@@ -17,10 +17,8 @@ Plain text, as it came out of the daemon or `journalctl`. A test should look onl
 - `write bytes=6a …` lines are commands the daemon sent. `6a 05 fd f8 43` is the keep-alive poll;
   `6a 17 …` (23 bytes) is a control or SetSpeed command.
 - Lines starting with `#` at the top are notes added afterwards: what the person did, and when.
-- Some files hold frames already **decoded** by [`frames.awk`](frames.awk)
-  (`HH:MM:SS state=.. speed=.. dist=.. dur=.. kcal@18=.. steps@43=.. raw41=..`), because only that
-  output was saved. They are still good ground truth for sessions and steps, but not for byte-level
-  decoder tests.
+- [`frames.awk`](frames.awk) prints one decoded line per second from any of these files
+  (`awk -f frames.awk FILE`), which is the quickest way to read a capture by eye.
 
 ## device-a
 
@@ -28,8 +26,8 @@ Plain text, as it came out of the daemon or `journalctl`. A test should look onl
 |---|---|
 | `2026-11-13-first-connect-68-34.log` | Daemon run with `--log debug`: connect, start from the remote, speed changes, stop. Every frame is `68 34`. The commands sent then were not yet accepted by the belt. |
 | `2026-11-16-paused-68-32.log` | One `68 34` connect frame, then raw `68 32` frames while paused, plus writes. |
-| `2026-11-17-walk-60-steps.log` | Decoded frames and raw writes for a walk: SetSpeed while paused (starts at 1.0 and loses the speed), 15 s off the belt (no auto-pause), pause and resume (counters kept), 60 hand-counted steps from 12:08:40 to 12:09:20, stop (steps stay at 268 afterwards). |
-| `2026-11-17-step-styles.log` | Decoded frames: hand-counted normal (86), long (65) and baby (114) steps, one minute each, then 104 normal steps at 4 km/h. The belt's count matches normal and long steps and under-counts baby steps (77). Stop resets steps to 0 here. |
+| `2026-11-17-walk-60-steps.log` | Full raw log of a walk: SetSpeed while paused (starts at 1.0 and loses the speed), 15 s off the belt (no auto-pause), pause and resume (counters kept), 60 hand-counted steps from 12:08:40 to 12:09:20, stop (steps stay at 268 afterwards). The daemon of that day recorded the session with `steps=0` (see the INFO lines in the header): a regression check for the steps fix. |
+| `2026-11-17-step-styles.log` | Full raw log: hand-counted normal (86), long (65) and baby (114) steps, one minute each, then 104 normal steps at 4 km/h. The belt's count matches normal and long steps and under-counts baby steps (77). The count is 446 at stop and resets to 0 about 6 s later. |
 
 ## Adding a capture from another treadmill
 

@@ -167,17 +167,6 @@ Item {
     // user's choice, and forcing 2 gridUnit would hide the thin-panel
     // distance line (H2).
 
-    // K2: shared formatters (K4 keeps its own copy in the popup)
-    function fmtTime(sec) {
-        const s = Math.round(sec);
-        const h = Math.floor(s / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        const r = s % 60;
-        return h > 0
-            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
-            : m + ":" + String(r).padStart(2, "0");
-    }
-
     // touchpad gestures send many small angleDelta events: accumulate and
     // step once per ±120 (REVIEW round-2 A6)
     property real wheelAccum: 0

@@ -356,7 +356,7 @@ Item {
                     horizontalAlignment: Text.AlignRight
                 }
                 PlasmaComponents3.Label {
-                    text: root.fmtTime(modelData.duration_s)
+                    text: root.fmtWalkLength(modelData.duration_s)
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 3
                     horizontalAlignment: Text.AlignRight
                 }

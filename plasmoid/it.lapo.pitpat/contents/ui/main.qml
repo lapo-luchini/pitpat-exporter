@@ -35,8 +35,17 @@ PlasmoidItem {
         return Qt.formatDate(d, "MMM d");
     }
     function fmtTime(sec) {
-        // N1: "12:00" next to a clock time reads as noon — durations are
-        // "12 min" under an hour and "2:00 h" from one hour up
+        const s = Math.round(sec);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const r = s % 60;
+        return h > 0
+            ? h + ":" + String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0")
+            : m + ":" + String(r).padStart(2, "0");
+    }
+    // O1: "12:00" next to a clock time reads as noon — a walk's total
+    // length is "12 min" under an hour and "2:00 h" from one hour up
+    function fmtWalkLength(sec) {
         const s = Math.round(sec);
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);

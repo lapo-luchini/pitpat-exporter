@@ -1,0 +1,153 @@
+# journalctl excerpt, 2026-11-16 17:15 local: one `68 34` connect frame, then `68 32` frames.
+
+% journalctl -u pitpat --since "-20min" | grep -E "status notification|write|SetSpeed|giving up" | head -150 
+Nov 16 17:15:51 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 40 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:51 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:52 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:52 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:53 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:53 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:54 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:54 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:55 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:55 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:56 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:56 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:57 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:57 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:58 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:58 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:15:59 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:15:59 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:00 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:00 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:01 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:01 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:02 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:02 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:03 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:03 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:04 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:04 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:05 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:05 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:06 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:06 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:07 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:07 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:08 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:08 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:09 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:09 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:10 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:10 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:11 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:11 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:12 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:12 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:13 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:13 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:14 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:14 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:15 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:15 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:16 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:16 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:17 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:17 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:18 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:18 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:19 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:19 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:20 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:20 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:21 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:21 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:22 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:22 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:23 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 10 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 07 43 state=Paused speed_kmh=0.0
+Nov 16 17:16:23 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 17 00 00 00 00 09 c4 05 00 56 00 04 00 00 00 0d ba 9d 76 ef 3e 43
+Nov 16 17:16:23 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 ef 22 18 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 0f 43 state=Starting speed_kmh=0.0
+Nov 16 17:16:23 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:24 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 f0 22 18 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 10 43 state=Starting speed_kmh=0.0
+Nov 16 17:16:24 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:25 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 f0 22 18 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 10 43 state=Starting speed_kmh=0.0
+Nov 16 17:16:25 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:26 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 00 00 00 00 00 00 04 dd 00 00 00 00 00 00 00 00 00 00 22 56 46 f0 22 18 17 70 00 05 64 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 05 10 43 state=Starting speed_kmh=0.0
+Nov 16 17:16:26 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:27 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 0a 00 c0 00 00 00 00 05 20 43 state=Running speed_kmh=1.0
+Nov 16 17:16:27 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:28 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 e8 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 08 01 10 00 00 00 00 05 18 43 state=Running speed_kmh=1.0
+Nov 16 17:16:28 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:28 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 e8 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 08 01 5f 00 00 00 00 05 57 43 state=Running speed_kmh=1.0
+Nov 16 17:16:28 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:29 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 d0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 08 01 b0 00 00 00 00 05 85 43 state=Running speed_kmh=1.0
+Nov 16 17:16:29 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:29 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 d0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 08 02 10 00 00 00 00 05 26 43 state=Running speed_kmh=1.0
+Nov 16 17:16:29 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:30 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0b b8 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 08 02 7f 00 00 00 00 05 2d 43 state=Running speed_kmh=1.0
+Nov 16 17:16:30 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:30 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0b b8 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 06 02 88 00 00 00 00 05 d5 43 state=Running speed_kmh=1.0
+Nov 16 17:16:30 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:31 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0f a0 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 08 02 82 00 00 00 00 05 cd 43 state=Running speed_kmh=1.0
+Nov 16 17:16:31 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:31 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0f a0 f0 22 08 17 70 00 05 64 01 00 00 00 00 00 00 00 08 02 7f 00 00 00 00 05 30 43 state=Running speed_kmh=1.0
+Nov 16 17:16:31 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:32 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 13 88 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 24 02 27 00 00 00 00 05 71 43 state=Running speed_kmh=1.0
+Nov 16 17:16:32 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:32 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 13 88 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 2e 02 2a 00 01 00 00 05 77 43 state=Running speed_kmh=1.0
+Nov 16 17:16:32 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:33 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 17 70 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3a 02 26 00 01 00 00 05 93 43 state=Running speed_kmh=1.0
+Nov 16 17:16:33 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:33 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 17 70 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 30 02 2c 00 01 00 00 05 93 43 state=Running speed_kmh=1.0
+Nov 16 17:16:33 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:34 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1b 58 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3a 02 30 00 01 00 00 05 a0 43 state=Running speed_kmh=1.0
+Nov 16 17:16:34 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:34 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1b 58 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 30 02 32 00 01 00 00 05 a8 43 state=Running speed_kmh=1.0
+Nov 16 17:16:34 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:35 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1f 40 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 2c 00 02 00 00 05 af 43 state=Running speed_kmh=1.0
+Nov 16 17:16:35 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:35 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1f 40 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3a 02 20 00 02 00 00 05 af 43 state=Running speed_kmh=1.0
+Nov 16 17:16:35 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:36 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 23 28 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 34 02 33 00 03 00 00 05 e7 43 state=Running speed_kmh=1.0
+Nov 16 17:16:36 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:36 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 23 28 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 28 00 03 00 00 05 fe 43 state=Running speed_kmh=1.0
+Nov 16 17:16:36 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:37 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 27 10 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3c 02 1f 00 04 00 00 05 f8 43 state=Running speed_kmh=1.0
+Nov 16 17:16:37 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:37 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 27 10 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 33 00 04 00 00 05 de 43 state=Running speed_kmh=1.0
+Nov 16 17:16:37 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:38 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2a f8 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 30 02 30 00 05 00 00 05 3c 43 state=Running speed_kmh=1.0
+Nov 16 17:16:38 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:38 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2a f8 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 30 02 23 00 05 00 00 05 2f 43 state=Running speed_kmh=1.0
+Nov 16 17:16:38 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:39 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2e e0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 38 02 30 00 06 00 00 05 2b 43 state=Running speed_kmh=1.0
+Nov 16 17:16:39 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:39 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2e e0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 1e 00 06 00 00 05 0b 43 state=Running speed_kmh=1.0
+Nov 16 17:16:39 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:40 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 32 c8 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 27 00 07 00 00 05 07 43 state=Running speed_kmh=1.0
+Nov 16 17:16:40 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:40 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 03 e8 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 32 c8 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 32 02 2f 00 08 00 00 05 04 43 state=Running speed_kmh=1.0
+Nov 16 17:16:40 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 17 00 00 00 00 09 c4 05 00 56 00 04 00 00 00 0d ba 9d 76 ef 3e 43
+Nov 16 17:16:41 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 03 e8 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 36 b0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 02 5a 00 08 00 00 05 2e 43 state=Running speed_kmh=1.0
+Nov 16 17:16:41 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:41 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 04 b0 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 36 b0 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3a 02 bb 00 09 00 00 05 9d 43 state=Running speed_kmh=1.2
+Nov 16 17:16:41 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:42 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 05 14 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3a 98 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3c 02 fc 00 09 00 00 05 5d 43 state=Running speed_kmh=1.3
+Nov 16 17:16:42 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:42 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 05 dc 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3a 98 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 38 03 5b 00 0a 00 00 05 34 43 state=Running speed_kmh=1.5
+Nov 16 17:16:42 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:43 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 06 a4 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3e 80 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 44 03 9c 00 0a 00 00 05 e8 43 state=Running speed_kmh=1.7
+Nov 16 17:16:43 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:43 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 07 08 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3e 80 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 36 03 ed 00 0a 00 00 05 46 43 state=Running speed_kmh=1.8
+Nov 16 17:16:43 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:44 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 07 d0 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 42 68 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 38 04 4c 00 0a 00 00 05 a2 43 state=Running speed_kmh=2.0
+Nov 16 17:16:44 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:44 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 08 34 09 c4 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 42 68 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 40 04 8d 00 0a 00 00 05 f0 43 state=Running speed_kmh=2.1
+Nov 16 17:16:44 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:45 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 08 fc 09 c4 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 46 50 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 32 04 ee 00 0b 00 00 05 13 43 state=Running speed_kmh=2.3
+Nov 16 17:16:45 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:45 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 09 c4 09 c4 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 46 50 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 3a 05 02 00 0c 00 00 05 c8 43 state=Running speed_kmh=2.5
+Nov 16 17:16:45 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+Nov 16 17:16:46 host pitpat[448321]: DEBUG pitpat::core: status notification bytes=68 32 00 09 c4 09 c4 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 4a 38 f0 22 08 17 70 00 05 64 00 00 00 00 00 00 00 00 38 04 f7 00 0c 00 00 05 5b 43 state=Running speed_kmh=2.5
+Nov 16 17:16:46 host pitpat[448321]: DEBUG pitpat::core: write bytes=6a 05 fd f8 43

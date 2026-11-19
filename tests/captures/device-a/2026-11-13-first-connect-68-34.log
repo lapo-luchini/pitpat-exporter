@@ -1,0 +1,249 @@
+# Daemon run, 2026-11-13 18:00 UTC: connect, remote-control start, speed changes, stop.
+# Every status frame in this run is the 52-byte `68 34` variant. Commands were not yet accepted.
+
+% nix develop -c cargo run --release -- daemon --log debug | tee session.log
+    Finished `release` profile [optimized] target(s) in 0.29s
+     Running `target/release/pitpat daemon --log debug`
+ INFO pitpat: pitpat daemon starting version="0.1.0"
+ INFO pitpat: HTTP ready listen=127.0.0.1:9839
+ INFO pitpat::ble: connecting over BlueZ adapter="hci2"
+ WARN pitpat: connection failed err=Dead("Bluetooth operation in progress: Operation already in progress")
+ WARN pitpat: connection failed err=Dead("the target object was either not present or removed")
+ WARN pitpat: connection failed err=Dead("the target object was either not present or removed")
+ INFO pitpat::ble: connecting over BlueZ adapter="hci0"
+ INFO pitpat::ble: BLE connected device=C4:A9:B8:7A:49:EF
+DEBUG pitpat::ble: notifications subscribed
+ INFO pitpat: link established address=C4:A9:B8:7A:49:EF
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 17 00 00 00 00 07 d0 01 00 50 00 04 00 00 00 0d ba 9d 76 ef 26 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 10 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 84 43 state=Paused speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e4 22 18 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 8c 43 state=Starting speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e5 22 18 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 8d 43 state=Starting speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e5 22 18 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 8d 43 state=Starting speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 33 15 e5 22 18 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 8d 43 state=Starting speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 b9 43 state=Running speed_kmh=0.0
+ INFO pitpat::core: session started
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 e8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 52 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03 e8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 52 43 state=Running speed_kmh=1.0
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 d0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 6e 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 07 d0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 6e 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0b b8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 0a 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0b b8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 0a 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0f a0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 16 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 03 e8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0f a0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 16 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 04 4c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 13 88 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 81 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 13 88 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 22 43 state=Running speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 17 70 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 de 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 17 70 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 de 43 state=Running speed_kmh=1.1
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1b 58 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 fb 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1b 58 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 fb 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1f 40 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e7 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 1f 40 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e7 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 23 28 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 b3 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 23 28 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 b3 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 b0 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 27 10 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 73 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 27 10 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 8f 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2a f8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 69 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2a f8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 69 43 state=Running speed_kmh=1.2
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2e e0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 75 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 2e e0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 75 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 32 c8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 41 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 32 c8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 41 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 36 b0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3c 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 36 b0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3c 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3a 98 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 18 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3a 98 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 18 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3e 80 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 04 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 3e 80 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 04 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 42 68 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 90 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 03 00 00 00 00 00 00 00 00 00 00 00 42 68 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 90 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 46 50 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 ab 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 46 50 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 ab 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 4a 38 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 cf 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 4a 38 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 cf 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 b0 04 b0 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 4e 20 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 d3 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 4e 20 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 d3 43 state=Running speed_kmh=1.2
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 52 08 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e6 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 52 08 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e6 43 state=Running speed_kmh=1.1
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 55 f0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 19 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 55 f0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 19 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 59 d8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3d 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 59 d8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3d 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 5d c0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 21 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 05 00 00 00 00 00 00 00 00 00 00 00 5d c0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 21 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 61 a8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 76 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 61 a8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 76 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 65 90 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 4a 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 65 90 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 4a 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 69 78 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 ae 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 69 78 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 ae 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 6d 60 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 b2 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 6d 60 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 b2 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 71 48 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 87 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 71 48 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 87 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 75 30 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 fb 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 75 30 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 fb 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 79 18 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 df 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 79 18 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 df 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 17 00 00 00 00 07 d0 05 00 50 00 04 00 00 00 0d ba 9d 76 ef 22 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 7d 00 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 cc 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 7d 00 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 cc 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 80 e8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 d9 43 state=Running speed_kmh=1.1
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 80 e8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 d9 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 84 d0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e5 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 84 d0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 e5 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 17 00 00 00 00 07 d0 05 00 50 00 04 00 00 00 0d ba 9d 76 ef 22 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 88 b8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 81 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 08 00 00 00 00 00 00 00 00 00 00 00 88 b8 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 81 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 8c a0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 9c 43 state=Running speed_kmh=1.1
+ INFO pitpat::core: belt settled elsewhere; syncing target speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 8c a0 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 9c 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 90 88 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 a8 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 90 88 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 a8 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 94 70 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 54 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 09 00 00 00 00 00 00 00 00 00 00 00 94 70 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 54 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 98 58 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 73 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 98 58 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 73 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 9c 40 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 6f 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 9c 40 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 6f 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a0 28 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3b 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a0 28 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 3b 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 04 4c 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a4 10 e5 22 08 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 07 43 state=Running speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 04 4c 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a4 5c e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 0b 43 state=Stopped speed_kmh=1.1
+ INFO pitpat::core: session ended start=2026-11-13T18:01:17.438306259Z end=2026-11-13T18:01:59.423107847Z distance_m=10 steps=0 kcal=0 duration_s=42.0 end_reason="stopped"
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a4 5c e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 a8 43 state=Stopped speed_kmh=1.1
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a4 5c e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 a8 43 state=Stopped speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 03 e8 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 a4 5c e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 a8 43 state=Stopped speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 bb 43 state=Stopped speed_kmh=1.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 bb 43 state=Stopped speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 bb 43 state=Stopped speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 bb 43 state=Stopped speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+DEBUG pitpat::core: status notification bytes=68 34 00 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00 e5 22 00 17 70 00 05 64 74 51 35 35 31 39 31 72 55 6b 32 79 67 33 34 31 0e 00 bb 43 state=Stopped speed_kmh=0.0
+DEBUG pitpat::core: write bytes=6a 05 fd f8 43
+^C INFO pitpat: shutdown signal received

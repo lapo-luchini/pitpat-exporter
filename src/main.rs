@@ -11,6 +11,8 @@ mod http;
 mod link;
 mod metrics;
 mod protocol;
+#[cfg(test)]
+mod replay;
 mod session;
 mod sim;
 

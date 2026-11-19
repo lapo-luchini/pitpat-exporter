@@ -99,56 +99,106 @@ impl Status {
     }
 }
 
-/// Decode a 31-byte status notification.
+/// Per-model decoder boundary (§3.2): one implementation per frame
+/// layout, picked from the frame header. A second treadmill model (a
+/// `device-b/` capture in `tests/captures/`) gets its own implementation
+/// and its own replay tests, without touching device-a's.
+pub trait FrameDecoder {
+    /// Model name, for logs and tests.
+    fn name(&self) -> &'static str;
+    /// Decode a status notification; `None` when the packet is not valid.
+    fn decode_status(&self, pkt: &[u8]) -> Option<Status>;
+}
+
+/// device-a (the model seen on hardware so far): 50-byte `68 32` walk
+/// frames and 52-byte `68 34` connect frames (§3.2).
+pub struct DeviceA;
+
+impl FrameDecoder for DeviceA {
+    fn name(&self) -> &'static str {
+        "device-a"
+    }
+
+    fn decode_status(&self, pkt: &[u8]) -> Option<Status> {
+        if pkt.len() < 31 {
+            return None;
+        }
+        let be16 = |i: usize| u16::from_be_bytes([pkt[i], pkt[i + 1]]);
+        // K7: steps live at u16 @43, but only in the 50-byte `68 32` frames
+        // the treadmill sends while the belt runs. The 52-byte `68 34` frame
+        // right after connect has an ASCII serial in its tail: no steps value.
+        let steps = if pkt.len() >= 45 && pkt[1] == 0x32 {
+            Some(u32::from(be16(43)))
+        } else {
+            None
+        };
+        let be32 = |i: usize| u32::from_be_bytes([pkt[i], pkt[i + 1], pkt[i + 2], pkt[i + 3]]);
+
+        let flags = pkt[26];
+        let imperial = flags & 0x80 != 0;
+        const MPH_TO_MPS: f64 = 0.44704;
+        const MI_TO_M: f64 = 1609.344;
+
+        let speed_mps = if imperial {
+            be16(3) as f64 / 1000.0 * MPH_TO_MPS
+        } else {
+            be16(3) as f64 / 1000.0 / 3.6
+        };
+        // the treadmill's own target speed, same unit and scaling
+        let target_speed_kmh = if imperial {
+            be16(5) as f64 / 1000.0 * 1.609344
+        } else {
+            be16(5) as f64 / 1000.0
+        };
+        let distance_m = if imperial {
+            (be32(7) as f64 / 1000.0 * MI_TO_M).round() as u32
+        } else {
+            be32(7) // distance × 1000 per km == metres in metric mode
+        };
+
+        Some(Status {
+            speed_mps,
+            target_speed_kmh,
+            distance_m,
+            steps,
+            kcal: be16(18),
+            duration_s: (be32(20) as f64 / 1000.0),
+            flags,
+        })
+    }
+}
+
+/// No capture of this model yet: every packet is rejected (and logged as
+/// invalid), so the daemon never invents a frame layout it has not seen.
+/// Its decoder arrives together with the first `device-b/` capture.
+struct UnknownModel;
+
+impl FrameDecoder for UnknownModel {
+    fn name(&self) -> &'static str {
+        "unknown"
+    }
+
+    fn decode_status(&self, _pkt: &[u8]) -> Option<Status> {
+        None
+    }
+}
+
+/// Pick the decoder from the frame header (`68 32`/`68 34` → device-a).
+/// A new header from another model gets its own arm here, together with
+/// its implementation and capture.
+pub fn decoder_for(pkt: &[u8]) -> &'static dyn FrameDecoder {
+    match (pkt.first(), pkt.get(1)) {
+        (Some(&0x68), Some(&0x32) | Some(&0x34)) => &DeviceA,
+        _ => &UnknownModel,
+    }
+}
+
+/// Decode a status notification with the decoder of the packet's model.
 ///
 /// Returns `None` for any packet that is not a valid status notification
 /// (the caller must log it and count it as invalid).
 pub fn decode_status(pkt: &[u8]) -> Option<Status> {
-    if pkt.len() < 31 {
-        return None;
-    }
-    let be16 = |i: usize| u16::from_be_bytes([pkt[i], pkt[i + 1]]);
-    // K7: steps live at u16 @43, but only in the 50-byte `68 32` frames
-    // the treadmill sends while the belt runs. The 52-byte `68 34` frame
-    // right after connect has an ASCII serial in its tail: no steps value.
-    let steps = if pkt.len() >= 45 && pkt[1] == 0x32 {
-        Some(u32::from(be16(43)))
-    } else {
-        None
-    };
-    let be32 = |i: usize| u32::from_be_bytes([pkt[i], pkt[i + 1], pkt[i + 2], pkt[i + 3]]);
-
-    let flags = pkt[26];
-    let imperial = flags & 0x80 != 0;
-    const MPH_TO_MPS: f64 = 0.44704;
-    const MI_TO_M: f64 = 1609.344;
-
-    let speed_mps = if imperial {
-        be16(3) as f64 / 1000.0 * MPH_TO_MPS
-    } else {
-        be16(3) as f64 / 1000.0 / 3.6
-    };
-    // the treadmill's own target speed, same unit and scaling
-    let target_speed_kmh = if imperial {
-        be16(5) as f64 / 1000.0 * 1.609344
-    } else {
-        be16(5) as f64 / 1000.0
-    };
-    let distance_m = if imperial {
-        (be32(7) as f64 / 1000.0 * MI_TO_M).round() as u32
-    } else {
-        be32(7) // distance × 1000 per km == metres in metric mode
-    };
-
-    Some(Status {
-        speed_mps,
-        target_speed_kmh,
-        distance_m,
-        steps,
-        kcal: be16(18),
-        duration_s: (be32(20) as f64 / 1000.0),
-        flags,
-    })
+    decoder_for(pkt).decode_status(pkt)
 }
 
 /// Build a 31-byte status notification (used by the simulator and tests).

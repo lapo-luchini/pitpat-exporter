@@ -150,7 +150,29 @@ is correct. After a stop the treadmill may reset duration and kcal to
 0 while distance drops first; steps behaved inconsistently between
 traces (staying at 268 once, resetting the other time). Distance does
 not drop at a stop — it stays until the next start (the counters reset
-together then).
+together then). The stop frame itself still carries the walk's final
+counters (sometimes a step or a metre above the last running frame)
+before the reset ~6 s later: the session record folds that final
+accounting in, then keeps the values mirrored while running.
+
+### 3.2a Per-model decoders and hardware captures
+
+The decoder is behind a per-model boundary (`FrameDecoder` in
+`protocol.rs`): one implementation per frame layout, picked from the
+frame header — `68 32`/`68 34` select `DeviceA`; a packet with any other
+header is rejected (logged as invalid), so the daemon never invents a
+layout it has not seen. A second treadmill model gets its own
+implementation plus its own replay tests, without touching device-a's.
+
+Real logs from PitPat treadmills live in `tests/captures/` (one folder
+per model, see its README): raw daemon debug logs with every status
+frame and every write. The replay tests (`src/replay.rs`) parse them —
+hex bytes after `bytes=`, in file order, with the line timestamps —
+check that every frame decodes and matches the `state=` text the old
+daemon logged, and feed the two 2026-11-17 walks to the core to assert
+one session per walk and the final step counts (268 and 446, the
+regression check for the old `steps=0` bug). The captures are embedded
+with `include_str!`, so both `cargo test` and the nix build see them.
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
 

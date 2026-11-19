@@ -178,6 +178,9 @@ pub const QUEUE_CAP: usize = 8;
 pub const WATCHDOG_S: u64 = 10;
 /// Periodic totals.json flush while running (§4.4).
 pub const PERSIST_S: u64 = 60;
+/// Sub-second moving-duration regression at the pause boundary (the
+/// belt's own rounding, seen in the real captures): not a counter reset.
+const DURATION_JITTER_S: f64 = 1.0;
 /// F1: settle-sync suppression window after a daemon-issued start.
 pub const SETTLE_SUPPRESS_S: u64 = 10;
 /// F1/G2: at most this many SetSpeed corrections per start.
@@ -607,10 +610,12 @@ impl Core {
             tracing::debug!(bytes = %hex(raw), "undecodable status notification");
             return;
         };
-        // §12: every packet in hex, both directions
+        // §12: every packet in hex, both directions, with the model that
+        // decoded it (visible once a second model exists)
         tracing::debug!(
             bytes = %hex(raw),
             state = ?st.belt_state(),
+            model = p::decoder_for(raw).name(),
             speed_kmh = st.speed_mps * 3.6,
             "status notification"
         );
@@ -643,9 +648,20 @@ impl Core {
         self.late_credit(&st, steps, belt);
         self.begin_session_if_needed(belt);
         if belt != State::Stopped {
-            // a Stopped packet carries the treadmill's post-reset counters
-            // (back to 0 on stop): keep the session's last values instead
             self.update_running_session(&st, steps);
+        } else if let Some(s) = self.session.as_mut() {
+            // §4.3: the stop frame usually still carries the walk's final
+            // counters — sometimes a step or a metre above the last
+            // running frame (the belt's final accounting) — before the
+            // counters reset ~6 s later. Fold it in when it grew; a
+            // post-reset stop frame (all counters back to 0) is ignored,
+            // so the record keeps the values mirrored while running.
+            if st.distance_m >= s.distance_m && st.duration_s >= s.duration_s && steps >= s.steps {
+                s.distance_m = st.distance_m;
+                s.steps = steps;
+                s.kcal = st.kcal;
+                s.duration_s = st.duration_s;
+            }
         }
         self.sync_target_speed(belt);
         self.state = belt;
@@ -841,7 +857,12 @@ impl Core {
         // distance or duration is a real reset (freeze the old values);
         // a lone steps drop with distance/duration still growing is a
         // stale carry-over — re-baseline steps without an offset.
-        if st.distance_m < s.distance_m || st.duration_s < s.duration_s {
+        // Real captures (tests/captures/) show the belt's moving-duration
+        // regressing a hair under one second at the pause boundary
+        // (106.999 → 106 with the distance frozen): that is the belt's
+        // own rounding, not a reset — only a drop past a packet tick
+        // counts (a real reset zeroes the distance with it anyway).
+        if st.distance_m < s.distance_m || st.duration_s < s.duration_s - DURATION_JITTER_S {
             self.session_offset.distance_m += s.distance_m;
             self.session_offset.steps += s.steps;
             self.session_offset.kcal += s.kcal;
@@ -2034,6 +2055,29 @@ mod tests {
         let rec = &crate::session::read_sessions(&dir, 4)[0];
         assert_eq!(rec.distance_m, 110, "record = offset + post-reset");
         assert_eq!(rec.duration_s, 190.0);
+    }
+
+    #[test]
+    fn pause_boundary_duration_jitter_is_not_a_reset() {
+        // Real captures (tests/captures/device-a/2026-11-17-walk-60-steps.log):
+        // the belt's moving duration regresses a hair under one second at
+        // the pause boundary, with the distance frozen — that is not a
+        // counter reset, and treating it as one double-counted the steps
+        // in the replay tests (REVIEW round-17 N3).
+        let dir = tmpdir("durjit");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&st(p::BeltState::Running, 1.0, 49, 101, 2, 106.999));
+        c.on_packet(&st(p::BeltState::Paused, 0.0, 49, 101, 2, 106.0));
+        c.on_packet(&st(p::BeltState::Running, 1.0, 119, 268, 10, 237.0));
+        // the stop frame carries the walk's final counters before the
+        // counters reset ~6 s later
+        c.on_packet(&st(p::BeltState::Stopped, 0.0, 119, 268, 10, 237.0));
+        let recs = crate::session::read_sessions(&dir, 4);
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].steps, 268, "not double-counted, not 0");
+        assert_eq!(recs[0].duration_s, 237.0);
     }
 
     #[test]

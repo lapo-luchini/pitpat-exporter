@@ -2704,6 +2704,18 @@ mod tests {
         );
         // held records don't double-count sessions
         assert_eq!(core.totals.sessions, 0, "counted on save, not on hold");
+        // L4: every Shutdown exit dumps the held records into the log,
+        // even without a live link (on_disconnect covers them all)
+        core.on_disconnect(DeadReason::Shutdown);
+        assert!(
+            core.pending_records.is_empty(),
+            "shutdown drains the held records"
+        );
+        // a second walk is held and then really saved by the retry below
+        core.begin_connection(None);
+        core.on_packet(&st(p::BeltState::Running, 2.0, 100, 140, 5, 100.0));
+        core.on_disconnect(DeadReason::Link);
+        assert!(!core.pending_records.is_empty(), "held again for the retry");
 
         // fix it: replace the impostor directory with a real file
         std::fs::remove_dir_all(dir.join("sessions.jsonl")).unwrap();

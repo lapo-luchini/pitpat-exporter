@@ -228,6 +228,10 @@ pub struct DeltaTracker {
 
 const MAX_DISTANCE_DELTA_M: u32 = 50;
 const MAX_STEPS_DELTA: u32 = 100;
+/// Sub-second moving-duration regression at the pause boundary (the
+/// belt's own rounding, seen in the real captures): not a counter reset
+/// (the session logic in `core.rs` uses the same threshold).
+pub const DURATION_JITTER_S: f64 = 1.0;
 
 impl DeltaTracker {
     pub fn new() -> Self {
@@ -261,7 +265,19 @@ impl DeltaTracker {
             self.last = Some(c);
             return None;
         }
-        self.last = Some(c);
+        // O2: a sub-second duration regression is the belt's pause
+        // jitter, not a reset: keep the previous value as the baseline,
+        // so the resume delta is the real ~0 change instead of a full
+        // second added to the lifetime moving time
+        let base = if (0.0..=DURATION_JITTER_S).contains(&(last.duration_s - c.duration_s)) {
+            Counters {
+                duration_s: last.duration_s,
+                ..c
+            }
+        } else {
+            c
+        };
+        self.last = Some(base);
         Some(Delta {
             distance_m: d(c.distance_m, last.distance_m),
             steps: d(c.steps, last.steps),
@@ -377,6 +393,54 @@ mod tests {
                 steps: 1,
                 kcal: 0,
                 moving_s: 0.0,
+            })
+        );
+    }
+
+    #[test]
+    fn subsecond_duration_jitter_is_not_a_reset() {
+        // O2: the belt's moving duration regresses a hair under one
+        // second at the pause boundary (the real captures): the lifetime
+        // moving time must not gain the ~1 s back at the resume
+        let mut dt = DeltaTracker::new();
+        dt.apply(c(0, 0, 0, 0.0));
+        dt.apply(c(49, 101, 2, 106.999));
+        // the pause-boundary regression: delta 0, old value kept as
+        // baseline
+        assert_eq!(
+            dt.apply(c(49, 101, 2, 106.0)),
+            Some(Delta {
+                distance_m: 0,
+                steps: 0,
+                kcal: 0,
+                moving_s: 0.0,
+            })
+        );
+        // the resume: from 106.999, so ~0 moved — not a full second
+        let d = dt.apply(c(50, 102, 2, 107.0)).expect("a delta");
+        assert_eq!((d.distance_m, d.steps, d.kcal), (1, 1, 0));
+        assert!(
+            (d.moving_s - 0.001).abs() < 1e-6,
+            "resume delta ~0, not a full second: {}",
+            d.moving_s
+        );
+        // a real reset (over the jitter threshold) still counts from zero
+        assert_eq!(
+            dt.apply(c(1, 1, 0, 0.0)),
+            Some(Delta {
+                distance_m: 1,
+                steps: 1,
+                kcal: 0,
+                moving_s: 0.0,
+            })
+        );
+        assert_eq!(
+            dt.apply(c(2, 2, 0, 1.0)),
+            Some(Delta {
+                distance_m: 1,
+                steps: 1,
+                kcal: 0,
+                moving_s: 1.0,
             })
         );
     }

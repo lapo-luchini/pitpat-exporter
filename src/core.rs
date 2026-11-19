@@ -178,9 +178,6 @@ pub const QUEUE_CAP: usize = 8;
 pub const WATCHDOG_S: u64 = 10;
 /// Periodic totals.json flush while running (§4.4).
 pub const PERSIST_S: u64 = 60;
-/// Sub-second moving-duration regression at the pause boundary (the
-/// belt's own rounding, seen in the real captures): not a counter reset.
-const DURATION_JITTER_S: f64 = 1.0;
 /// F1: settle-sync suppression window after a daemon-issued start.
 pub const SETTLE_SUPPRESS_S: u64 = 10;
 /// F1/G2: at most this many SetSpeed corrections per start.
@@ -862,7 +859,9 @@ impl Core {
         // (106.999 → 106 with the distance frozen): that is the belt's
         // own rounding, not a reset — only a drop past a packet tick
         // counts (a real reset zeroes the distance with it anyway).
-        if st.distance_m < s.distance_m || st.duration_s < s.duration_s - DURATION_JITTER_S {
+        if st.distance_m < s.distance_m
+            || st.duration_s < s.duration_s - crate::session::DURATION_JITTER_S
+        {
             self.session_offset.distance_m += s.distance_m;
             self.session_offset.steps += s.steps;
             self.session_offset.kcal += s.kcal;

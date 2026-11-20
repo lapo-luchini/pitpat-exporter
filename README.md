@@ -140,6 +140,29 @@ soon as the files become writable; the web page and the widget show a
 warning while saving fails (`persist_ok: false` in `/api/state`,
 `pitpat_persist_errors_total`).
 
+## Releasing
+
+`Cargo.toml` carries the last release's version; `pitpat --version`,
+`/metrics` `build_info` and the widget's About page show it plus the git
+describe suffix (e.g. `1.3.0-3-gabc1234`; nix builds show the exact
+commit as `1.3.0-gabc1234` since the store copy has no `.git`).
+
+To release a new version:
+
+1. once per clone, enable the pre-push hook:
+   `git config core.hooksPath contrib/githooks`;
+2. `contrib/release.sh X.Y.Z` — it refuses anything but a clean tree on
+   `trunk` and a version strictly newer than the current one, bumps
+   `Cargo.toml`, `Cargo.lock` and the plasmoid's `metadata.json`, runs
+   `cargo test`, commits `release X.Y.Z` and tags `X.Y.Z`;
+3. check the commit and the tag, then `git push --follow-tags`.
+
+Two guards keep the tags and the version in step: `cargo test`'s
+`version_matches_git_tag` fails when something was tagged without the
+bump (or HEAD sits on a tag that disagrees with `Cargo.toml`), and the
+pre-push hook refuses any pushed tag whose name differs from the
+`Cargo.toml` version of the tagged commit.
+
 ## Safety note about remote control
 
 The API can make the belt start moving on a machine someone may be standing on. Keep the

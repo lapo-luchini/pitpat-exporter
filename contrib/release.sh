@@ -37,12 +37,13 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 fi
 
 cur="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
-if ! [ "$cur" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]; then
+if ! [[ "$cur" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "refusing: cannot read the current version from Cargo.toml" >&2
     exit 1
 fi
 # numeric compare, so 1.10.0 > 1.9.0 (a plain sort would say otherwise)
-if [ "$(printf '%s\n%s\n' "$new" "$cur" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" != "$cur" ] \
+if ! [[ "$new" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || [ "$(printf '%s\n%s\n' "$new" "$cur" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" != "$cur" ] \
     || [ "$new" = "$cur" ]; then
     echo "refusing: $new is not newer than the current version $cur" >&2
     exit 1

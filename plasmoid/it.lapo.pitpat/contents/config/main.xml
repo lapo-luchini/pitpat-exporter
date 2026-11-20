@@ -24,6 +24,14 @@
             <label>Panel line 3: distance, time, speed or none</label>
             <default>speed</default>
         </entry>
+        <entry name="panelWidthMode" type="String">
+            <label>Panel width mode: auto (fit content) or fixed</label>
+            <default>auto</default>
+        </entry>
+        <entry name="panelWidth" type="Int">
+            <label>Fixed panel width in logical px (fixed width mode only)</label>
+            <default>120</default>
+        </entry>
         <entry name="pin" type="Bool">
             <label>Keep the popup open when clicking elsewhere</label>
             <default>false</default>

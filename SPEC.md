@@ -528,17 +528,35 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   Use `PlasmoidItem`, `PlasmaComponents3`, `Kirigami` per current Plasma 6 conventions.
 - Talks to the daemon with `XMLHttpRequest`. Poll `/api/state` every 1 s while the popup is open
   or the belt is moving, otherwise every 10 s.
-- **Compact representation** (panel): icon (`org.kde.plasma` icon `"run-build"` or similar
-  standard icon; a custom SVG is fine) plus, while a session is open, the **panel lines**.
-  The panel thickness picks **how many** lines show (height in text lines from
-  `Kirigami.Units.gridUnit`: line 1 alone when very thin, lines 1+2 joined with ` · ` on one
-  line, lines 1/2 on two, lines 1/2/3 on three); the **order is configurable**
-  (`line1`/`line2`/`line3` each `distance`, `time`, `speed`, lines 2/3 may be `none`;
-  defaults: distance, time, speed) with one formatter per field so all modes agree. `none`
-  lines are skipped without leaving gaps; the width follows the widest line so nothing is
-  clipped. Vertical panels keep the icon only. Distance is the default first line. Icon greyed
-  out when disconnected. Left click = popup, middle-click = toggle start/pause. Mouse wheel
-  over it = ±0.1 km/h.
+- **Compact representation** (panel): one `RowLayout` holding the icon
+  (`org.kde.plasma` icon `"run-build"` or similar standard icon; a custom SVG is
+  fine) and, while a session is open, the **panel lines** — so the text can only
+  ever sit to the right of the icon, and the item `clip`s everything inside its
+  area. The panel thickness picks **how many** lines show (height in text lines
+  from `Kirigami.Units.gridUnit`: line 1 alone when very thin, lines 1+2 joined
+  with ` · ` on one line, lines 1/2 on two, lines 1/2/3 on three); the **order
+  is configurable** (`line1`/`line2`/`line3` each `distance`, `time`, `speed`,
+  lines 2/3 may be `none`; defaults: distance, time, speed) with one formatter
+  per field so all modes agree. `none` lines are skipped without leaving gaps.
+  Vertical panels keep the icon only. When stopped: icon only, in both width
+  modes. Distance is the default first line. Icon greyed out when disconnected.
+  Left click = popup, middle-click = toggle start/pause. Mouse wheel over it =
+  ±0.1 km/h.
+- **Panel width** (Q1): the width hints (`minimumWidth` = `preferredWidth`)
+  come from the layout's content width, so the panel never falls back to an
+  icon-sized square, and the text never paints over the icon or the neighbours.
+  Two modes in the config: **auto** (default) — the widget is as wide as its
+  content; **fixed** — `panelWidth` (logical px, in the widget's settings,
+  because Plasma 6 panels can't be resized by hand), the text elides on the
+  right and the icon always shows in full (a width smaller than the icon leaves
+  the icon). A fixed width applies only while text is shown, so a stopped
+  widget does not reserve empty space.
+- **No jitter** (Q1): the digits are tabular (`font.features: { "tnum": 1 }`)
+  and every line is sized for the **widest value of its current format**
+  (a `TextMetrics` template such as `0.00 km` / `00.00 km`, `00:00` /
+  `0:00:00`, `0.0 km/h` / `00.0 km/h`, picked by field and magnitude), not for
+  the live text — the width only changes when a value gains a digit (e.g. the
+  first hour).
 - **Full representation** (popup): same information and controls as the web page (§9) except the
   sessions table (show only the last 3 sessions), in native Plasma style. State chip with a
   coloured dot and the human labels; one hero row (distance / time / speed with the panel's
@@ -551,7 +569,8 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   each distance milestone (config, default every 1 km of session distance), target reached,
   disconnect while running.
 - **Config page** (`main.xml` + `configGeneral.qml`): daemon URL, token, milestone km (0 = off),
-  pin (keep the popup open while clicking elsewhere), panel line 1/2/3 order (K2).
+  pin (keep the popup open while clicking elsewhere), panel line 1/2/3 order (K2), panel width
+  mode (`auto`/`fixed`) and the fixed width in px (Q1).
 - **Popup pin** (`window-pin` tool button in the popup's top row, bound to the `pin` config,
   `hideOnWindowDeactivate: !pin`): while pinned the popup stays open and live-updates during a
   walk.

@@ -20,6 +20,9 @@ KCM.SimpleKCM {
     property string cfg_line1: "distance"
     property string cfg_line2: "time"
     property string cfg_line3: "speed"
+    // Q1: panel width mode (auto = fit content) and the fixed width
+    property string cfg_panelWidthMode: "auto"
+    property int cfg_panelWidth: 120
 
     Kirigami.FormLayout {
         QQC.TextField {
@@ -83,6 +86,32 @@ KCM.SimpleKCM {
             currentIndex: model.indexOf(general.cfg_line3)
             onActivated: general.cfg_line3 = currentText
             Kirigami.FormData.label: i18n("Panel line 3:")
+        }
+        // Q1: panel width — Plasma 6 panels can't be resized by hand, so
+        // the widget either fits its content (default) or takes a fixed
+        // width chosen here
+        RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            Kirigami.FormData.label: i18n("Panel width:")
+            QQC.RadioButton {
+                text: i18n("Fit content")
+                checked: general.cfg_panelWidthMode !== "fixed"
+                onToggled: general.cfg_panelWidthMode = "auto"
+            }
+            QQC.RadioButton {
+                text: i18n("Fixed")
+                checked: general.cfg_panelWidthMode === "fixed"
+                onToggled: general.cfg_panelWidthMode = "fixed"
+            }
+            QQC.SpinBox {
+                from: 40
+                to: 2000
+                stepSize: 10
+                editable: true
+                enabled: general.cfg_panelWidthMode === "fixed"
+                value: general.cfg_panelWidth
+                onValueModified: general.cfg_panelWidth = value
+            }
         }
     }
 }

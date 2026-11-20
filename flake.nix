@@ -7,6 +7,19 @@
   outputs =
     { self, nixpkgs }:
     let
+      # R3: nix builds cannot run `git describe` (no `.git` in the store
+      # copy), so the flake computes the version itself: the Cargo.toml
+      # release version plus `-g<hash>` (`-dirty` on a dirty tree). Flakes
+      # expose no tags, so the commits-since-tag count is missing there;
+      # a plain `cargo build` in a checkout gets it from build.rs.
+      cargoVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+      version =
+        if self ? dirtyShortRev then
+          "${cargoVersion}-g${self.dirtyShortRev}"
+        else if self ? shortRev then
+          "${cargoVersion}-g${self.shortRev}"
+        else
+          cargoVersion;
       forAllSystems =
         f:
         nixpkgs.lib.genAttrs [
@@ -37,8 +50,11 @@
       packages = forAllSystems (
         { pkgs, ... }:
         {
-          pitpat = pkgs.callPackage ./nix/package.nix { src = self; };
-          plasmoid = pkgs.callPackage ./nix/plasmoid.nix { };
+          pitpat = pkgs.callPackage ./nix/package.nix {
+            src = self;
+            inherit version;
+          };
+          plasmoid = pkgs.callPackage ./nix/plasmoid.nix { inherit version; };
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.pitpat;
         }
       );

@@ -5,6 +5,7 @@
   pkg-config,
   dbus,
   src,
+  version,
 }:
 
 # `src` is the flake root passed from flake.nix (a store path); a relative
@@ -13,13 +14,16 @@
 
 rustPlatform.buildRustPackage {
   pname = "pitpat";
-  version = "0.1.0";
-  inherit src;
+  inherit version src;
 
   cargoLock.lockFile = src + "/Cargo.lock";
 
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [ dbus ];
+
+  # R3: the store copy has no `.git`, so build.rs's git describe would
+  # fall back to the release version; the flake-computed version wins
+  env.PITPAT_VERSION = version;
 
   # the unit-test suite: golden protocol vectors, queue semantics,
   # delta logic, sessions, targets

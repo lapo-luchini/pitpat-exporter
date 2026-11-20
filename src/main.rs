@@ -15,6 +15,8 @@ mod protocol;
 mod replay;
 mod session;
 mod sim;
+#[cfg(test)]
+mod version;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -22,7 +24,8 @@ use std::process::ExitCode;
 #[derive(Parser, Debug)]
 #[command(
     name = "pitpat",
-    about = "PitPat treadmill control + Prometheus export"
+    about = "PitPat treadmill control + Prometheus export",
+    version = env!("PITPAT_VERSION")
 )]
 struct Cli {
     #[command(subcommand)]
@@ -197,10 +200,7 @@ fn init_logging(cfg: &config::Config) {
 async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
     use tokio::sync::{broadcast, mpsc};
 
-    tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "pitpat daemon starting"
-    );
+    tracing::info!(version = env!("PITPAT_VERSION"), "pitpat daemon starting");
 
     let totals = session::load_totals(&cfg.state_dir);
     let metrics = std::sync::Arc::new(metrics::Metrics::new());

@@ -15,7 +15,7 @@
         "License": "ISC",
         "Website": "https://github.com/lapo-luchini/pitpat-exporter",
         "BugReportUrl": "https://github.com/lapo-luchini/pitpat-exporter/issues",
-        "Version": "0.1.0"
+        "Version": "1.3.0"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

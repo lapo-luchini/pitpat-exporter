@@ -140,7 +140,7 @@ impl Metrics {
 
         let bu: Family<BuildInfo, Gauge> = Family::default();
         bu.get_or_create(&BuildInfo {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("PITPAT_VERSION").to_string(),
         })
         .set(1);
         sub.register("build_info", "build version, always 1".to_string(), bu);

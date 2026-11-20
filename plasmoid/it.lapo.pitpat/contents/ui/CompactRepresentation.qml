@@ -91,26 +91,21 @@ Item {
         return out;
     }
 
-    // Q1/no-jitter: every line is sized for the WIDEST value of its
-    // current format (a template picked by field and magnitude), not for
-    // the live text — combined with tabular figures the width only
-    // changes when a value gains a digit (e.g. the first hour)
-    readonly property var templates: ({
-        distance: sessionKm >= 1000 ? "0000.00 km"
-            : sessionKm >= 100 ? "000.00 km"
-            : sessionKm >= 10 ? "00.00 km"
-            : "0.00 km",
-        time: (hasSession && root.snap.session.duration_s >= 3600)
-            ? "0:00:00" : "00:00",
-        speed: root.snap.speed_kmh >= 10 ? "00.0 km/h" : "0.0 km/h",
-    })
+    // R2/no-jitter: every line is sized for its own live text with every
+    // digit replaced by `0` — with tabular figures that is exactly the
+    // same width, so the widget only resizes when the text changes
+    // length (e.g. the first hour), and even a proportional font is
+    // measured on stable zeros
+    function zeroDigits(s) {
+        return s.replace(/[0-9]/g, "0");
+    }
     function lineTemplate(i) {
         const f = visibleLines[i];
-        return f ? templates[f] : "";
+        return f ? zeroDigits(lineTexts[f]) : "";
     }
     // singleLine joins its fields with ` · ` like the live text
     readonly property string singleTemplate:
-        visibleLines.map(function (l) { return templates[l]; }).join(" · ")
+        visibleLines.map(function (l) { return zeroDigits(lineTexts[l]); }).join(" · ")
 
     // the fonts must match the rendered texts exactly (line 0 is the
     // larger bold one, the rest are the smaller grey ones)

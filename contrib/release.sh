@@ -60,7 +60,7 @@ cargo test
 
 git add Cargo.toml Cargo.lock plasmoid/it.lapo.pitpat/metadata.json
 git commit -m "release $new"
-git tag -a "$new" -m "Version $new"
+git tag -s "$new" -m "Version $new"
 
 echo
 echo "released $new: review the commit and the tag, then push them:"

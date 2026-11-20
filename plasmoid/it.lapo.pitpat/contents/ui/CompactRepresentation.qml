@@ -146,6 +146,14 @@ Item {
     readonly property real iconSpace:
         icon.width + Kirigami.Units.smallSpacing
 
+    // R1: the icon fills the panel thickness, capped in very thick
+    // panels; on vertical panels the width is fixed by the panel, so fit
+    // that instead (J2: the size comes from the shell-provided compact
+    // item, never from the row, so there is no feedback loop)
+    readonly property real iconSize: compact.vertical
+        ? Math.min(compact.width, Kirigami.Units.gridUnit * 3)
+        : Math.min(compact.height, Kirigami.Units.gridUnit * 3)
+
     // Q1: one layout tree — icon, then the one-line text or the column of
     // lines, all aligned vertically by the layout, no manual anchors, so
     // the text can only ever sit to the right of the icon
@@ -162,14 +170,19 @@ Item {
             id: icon
             source: "run-build"
             Layout.alignment: Qt.AlignVCenter
-            // fill the panel thickness; capped in very thick panels. On
-            // vertical panels the width is fixed by the panel, so fit it
-            // too (J2: the size comes from the shell-provided compact
-            // item, never from the row, so there is no feedback loop)
-            height: compact.vertical
-                ? Math.min(compact.width, Kirigami.Units.gridUnit * 3)
-                : Math.min(compact.height, Kirigami.Units.gridUnit * 3)
-            width: height
+            // R1: a layout sets width/height of its children itself
+            // (from Layout.preferred* or else the implicit size), so the
+            // panel-thickness binding must be on the Layout hints, not
+            // on width/height — a first-pass override would freeze the
+            // icon at the initial size forever. min/max keep it square
+            // and unstretched in fixed-width mode. J2: the size comes
+            // from the shell-provided compact item, never from the row.
+            Layout.preferredWidth: iconSize
+            Layout.preferredHeight: iconSize
+            Layout.minimumWidth: iconSize
+            Layout.maximumWidth: iconSize
+            Layout.minimumHeight: iconSize
+            Layout.maximumHeight: iconSize
             opacity: compact.connected ? 1 : 0.35
         }
 

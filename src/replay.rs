@@ -7,7 +7,7 @@
 //! N3). All files are device-a; a `device-b/` folder gets its own decoder
 //! (§3.2) and its own replay tests here.
 
-use jiff::Timestamp;
+use jiff::civil::DateTime;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use crate::session::{SessionRec, Totals};
 /// One parsed `bytes=…` line of a capture file.
 struct Frame {
     /// Wall-clock time of the log line, second resolution.
-    ts: Option<Timestamp>,
+    ts: Option<DateTime>,
     /// The hex bytes after `bytes=`.
     bytes: Vec<u8>,
     /// The `state=` text the old daemon logged next to the frame.
@@ -74,7 +74,7 @@ fn parse_hex_byte(word: &str) -> Option<u8> {
     }
 }
 
-fn parse_ts(year: i16, mon: &str, day: &str, hms: &str) -> Option<Timestamp> {
+fn parse_ts(year: i16, mon: &str, day: &str, hms: &str) -> Option<DateTime> {
     let mon = match mon {
         "Jan" => 1,
         "Feb" => 2,
@@ -95,13 +95,13 @@ fn parse_ts(year: i16, mon: &str, day: &str, hms: &str) -> Option<Timestamp> {
     let h: i8 = it.next()?.parse().ok()?;
     let m: i8 = it.next()?.parse().ok()?;
     let s: i8 = it.next()?.parse().ok()?;
-    Some(
-        jiff::civil::date(year, mon, day)
-            .at(h, m, s, 0)
-            .in_tz("Europe/Rome")
-            .expect("Europe/Rome is a valid time zone")
-            .timestamp(),
-    )
+    // The nix test sandbox has no system time-zone database, so
+    // `in_tz("Europe/Rome")` panics there (the daemon build found it out).
+    // Capture lines are wall-clock times in the walker's zone (the
+    // captures README says which); the tests only compare them for order
+    // and print them in failures, so the civil (zone-less) value is
+    // enough and needs no tzdb at all.
+    Some(jiff::civil::date(year, mon, day).at(h, m, s, 0))
 }
 
 /// The committed device-a captures, name plus contents (embedded, so

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: ISC
+#
+# R5.3: the last local gate before a version tag becomes public. Git has
+# no on-tag-create hook and a pre-commit hook cannot know a tag that does
+# not exist yet, so this runs at push time. For every pushed ref under
+# refs/tags/ the tag name must equal the `version` in the Cargo.toml of
+# the tagged commit — otherwise the nix builds would show a version that
+# does not exist. Enabled once per clone with:
+#
+#   git config core.hooksPath contrib/githooks
+#
+# (contrib/release.sh tags correctly by construction; this catches
+# hand-made tags like `git tag 1.4.1` on an unbumped trunk.)
+set -euo pipefail
+
+zero=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$local_ref" in
+        refs/tags/*) ;;
+        *) continue ;;
+    esac
+    # a tag deletion reads as the null sha: nothing to check
+    [ "$local_sha" = "$zero" ] && continue
+    tag="${local_ref#refs/tags/}"
+    version="$(git show "$local_sha":Cargo.toml \
+        | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)"
+    if [ "$version" != "$tag" ]; then
+        echo "refusing push of tag $tag: Cargo.toml at that commit says" \
+            "'$version' (use contrib/release.sh to bump, then tag)" >&2
+        exit 1
+    fi
+done
+exit 0

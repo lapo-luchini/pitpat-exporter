@@ -61,6 +61,11 @@ pub struct Config {
     #[arg(long, env = "PITPAT_SIMULATE")]
     pub simulate: bool,
 
+    /// Treadmill model the simulator speaks: pitpat (fba0) or superun
+    /// (ffff, e.g. PitPat-T01; §3.7).
+    #[arg(long, env = "PITPAT_SIMULATE_MODEL", default_value = "pitpat", value_parser = ["pitpat", "superun"])]
+    pub simulate_model: String,
+
     /// Disconnect after this many seconds stopped with no API activity
     /// and sleep (no reconnect) until a control call wakes the daemon;
     /// 0 keeps the old always-connected behaviour (§4.5a).

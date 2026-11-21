@@ -72,10 +72,18 @@ pub enum WireCmd {
 impl WireCmd {
     /// Encode, resolving pause/stop speed per §3.3: the current target
     /// speed, clamped (any valid value works; the reference sends 1000).
-    fn packet(&self, target_speed_kmh: f64, cfg: &crate::config::DaemonCfg) -> Vec<u8> {
+    fn packet(
+        &self,
+        target_speed_kmh: f64,
+        cfg: &crate::config::DaemonCfg,
+        variant: p::Variant,
+    ) -> Vec<u8> {
         let pause_speed = target_speed_kmh.clamp(cfg.min_speed, cfg.max_speed);
-        let out =
-            |c: p::Command, speed| p::encode_command(c, speed, cfg.weight_kg, cfg.user_id).to_vec();
+        let out = |c: p::Command, speed| {
+            variant
+                .encode_command(c, speed, cfg.weight_kg, cfg.user_id)
+                .to_vec()
+        };
         match *self {
             WireCmd::Start(s) => out(p::Command::Start, s),
             WireCmd::SetSpeed(s) => out(p::Command::SetSpeed, s),
@@ -233,6 +241,10 @@ pub struct Core {
     /// H1: when the last corrective SetSpeed went out.
     last_start_correct: Option<tokio::time::Instant>,
     imperial: bool,
+    /// Protocol family of the current link (§3.7), set on connect.
+    variant: p::Variant,
+    /// SupeRun frame sequence number, restarted on every connection.
+    seq: u8,
     pub speed_kmh: f64,
     pub target_speed_kmh: f64,
     address: Option<String>,
@@ -284,6 +296,8 @@ impl Core {
             persist_error: None,
             last_start_correct: None,
             imperial: false,
+            variant: p::Variant::default(),
+            seq: 0,
             speed_kmh: 0.0,
             target_speed_kmh,
             address: None,
@@ -602,7 +616,7 @@ impl Core {
     /// no state change; the caller still replies with cmd/heartbeat.
     pub fn on_packet(&mut self, raw: &[u8]) {
         self.metrics.last_notification.set(unix_now());
-        let Some(st) = p::decode_status(raw) else {
+        let Some(st) = self.variant.decode_status(raw) else {
             self.metrics.invalid_packets_total.inc_by(1);
             tracing::debug!(bytes = %hex(raw), "undecodable status notification");
             return;
@@ -1032,6 +1046,7 @@ impl Core {
     /// Fresh connection: the next notification becomes the deltas baseline.
     pub fn begin_connection(&mut self, address: Option<String>) {
         self.address = address;
+        self.seq = 0;
         self.deltas.reset();
         // first running after the (re)connect opens a session (§4.3)
         self.may_open = true;
@@ -1040,6 +1055,21 @@ impl Core {
         self.expect_late_credit = false;
         self.forget_settle();
         self.publish();
+    }
+
+    /// A link just came up: take its protocol family (§3.7), then start
+    /// the connection as above. Returns the device address.
+    pub fn begin_link<C: Notify>(&mut self, conn: &C) -> String {
+        let addr = conn.address();
+        self.variant = conn.variant();
+        tracing::info!(address = %addr, variant = self.variant.as_str(), "protocol");
+        self.begin_connection(Some(addr.clone()));
+        addr
+    }
+
+    /// Protocol family of the current (or last) link.
+    pub fn variant(&self) -> p::Variant {
+        self.variant
     }
 
     // ---------------------------------------------------- §4.5a sleep
@@ -1109,9 +1139,19 @@ impl Core {
             return pk;
         }
         match self.queue.pop_front() {
-            Some(c) => c.packet(self.target_speed_kmh, &self.cfg),
+            Some(c) => c.packet(self.target_speed_kmh, &self.cfg, self.variant),
             None => p::HEARTBEAT.to_vec(),
         }
+    }
+
+    /// Wire bytes for a reply packet: framed with the next sequence
+    /// number on SupeRun links, as is otherwise (§3.7).
+    fn wire(&mut self, pkt: &[u8]) -> Vec<u8> {
+        let out = self.variant.frame(self.seq, pkt);
+        if self.variant == p::Variant::SupeRun {
+            self.seq = self.seq.wrapping_add(1);
+        }
+        out
     }
 
     pub fn write_succeeded(&mut self) {
@@ -1160,13 +1200,16 @@ fn unix_now() -> f64 {
 
 // ------------------------------------------------------------------ pump
 
-/// One reply packet per notification: next queued command or heartbeat,
-/// with the same-packet retry rule on write errors (§3.5).
+/// One reply packet (per notification, or per keep-alive tick on SupeRun
+/// links): next queued command or heartbeat, with the same-packet retry
+/// rule on write errors (§3.5). A retry is re-framed with a new sequence
+/// number.
 async fn write_reply<C: Notify>(core: &mut Core, conn: &mut C) {
     let pkt = core.next_reply();
+    let wire = core.wire(&pkt);
     // §12: every packet in hex, both directions
-    tracing::debug!(bytes = %hex(&pkt), "write");
-    if conn.write_packet(&pkt).await.is_ok() {
+    tracing::debug!(bytes = %hex(&wire), "write");
+    if conn.write_packet(&wire).await.is_ok() {
         core.write_succeeded();
         return;
     }
@@ -1176,20 +1219,31 @@ async fn write_reply<C: Notify>(core: &mut Core, conn: &mut C) {
 }
 
 /// Drive one connection until it dies: apply notifications, send exactly
-/// one packet per notification (§3.1), enforce the 10 s liveness watchdog
-/// (§4.1), flush totals every 60 s (§4.4). The caller reconnects (or
-/// shuts down) upon return.
+/// one packet per notification (§3.1) — or, on SupeRun links, one per
+/// 200 ms keep-alive tick and none in reply (§3.7) — enforce the 10 s
+/// liveness watchdog (§4.1), flush totals every 60 s (§4.4). The caller
+/// reconnects (or shuts down) upon return.
 pub async fn pump<C: Notify>(
     core: &mut Core,
     conn: &mut C,
     ctrl: &mut mpsc::Receiver<Ctrl>,
 ) -> DeadReason {
-    // The notification future is recreated on every loop pass; this is safe
-    // ONLY because no other select arm can complete while it is pending —
-    // an earlier two-price sleep arm caused the recreated timer to restart
-    // and starve notifications forever.
+    // The notification future is recreated on every loop pass. On PitPat
+    // links no other select arm completes while it is pending — an earlier
+    // two-price sleep arm caused the recreated timer to restart and starve
+    // notifications forever. The SupeRun keep-alive arm below does fire
+    // while it is pending: that relies on recv_notification being
+    // cancel-safe (see `Notify`).
     let mut next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
     let mut last_notification = tokio::time::Instant::now();
+    // §3.7: a SupeRun link is kept alive by a timer; the interval lives
+    // outside the loop so it is never restarted, and every deadline in
+    // the loop is absolute.
+    let mut keepalive = core.variant().keepalive().map(|period| {
+        let mut i = tokio::time::interval(period);
+        i.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        i
+    });
     loop {
         core.drain_api_cmds();
         if core.take_sleep() {
@@ -1200,7 +1254,8 @@ pub async fn pump<C: Notify>(
         // timeout (§4.5a). The notification future is recreated every
         // pass, which is safe only because this timeout is never shorter
         // than the notification period (watchdog 10 s; idle ≥ stopped
-        // period); an earlier 200 ms tick arm starved notifications.
+        // period); an earlier 200 ms tick arm starved notifications
+        // (sleep-based, not cancel-safe, connections at the time).
         let watchdog_at = last_notification + Duration::from_secs(WATCHDOG_S);
         let at = core
             .idle_deadline()
@@ -1223,17 +1278,33 @@ pub async fn pump<C: Notify>(
                 last_notification = tokio::time::Instant::now();
                 core.on_packet(&raw);
                 core.drain_api_cmds();
-                write_reply(core, conn).await;
+                if keepalive.is_none() {
+                    write_reply(core, conn).await;
+                }
                 if core.moving() && tokio::time::Instant::now() >= next_persist {
                     next_persist = tokio::time::Instant::now() + Duration::from_secs(PERSIST_S);
                     core.persist();
                 }
+            }
+            _ = keepalive_tick(&mut keepalive) => {
+                core.drain_api_cmds();
+                write_reply(core, conn).await;
             }
             c = ctrl.recv() => match c {
                 Some(Ctrl::Shutdown) => return DeadReason::Shutdown,
                 None => return DeadReason::Link,
             },
         }
+    }
+}
+
+/// Next keep-alive tick; never completes on links without one.
+async fn keepalive_tick(keepalive: &mut Option<tokio::time::Interval>) {
+    match keepalive {
+        Some(i) => {
+            i.tick().await;
+        }
+        None => std::future::pending().await,
     }
 }
 
@@ -1246,17 +1317,26 @@ pub async fn shutdown_flow<C: Notify>(core: &mut Core, conn: &mut C) {
         tracing::info!("stopping the belt before exit");
         core.begin_shutdown();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        // §3.7: SupeRun links write every keep-alive period whether or
+        // not a notification came in, so the stop goes out right away
+        let keepalive = core.variant().keepalive();
+        let step = keepalive.unwrap_or(Duration::from_millis(500));
         while core.state != State::Stopped {
             if tokio::time::Instant::now() >= deadline {
                 tracing::warn!("belt not confirmed stopped within 3 s, exiting anyway");
                 break;
             }
-            if let Ok(Ok(raw)) =
-                tokio::time::timeout(Duration::from_millis(500), conn.recv_notification()).await
-            {
-                core.on_packet(&raw);
-                core.drain_api_cmds();
-                write_reply(core, conn).await;
+            match tokio::time::timeout(step, conn.recv_notification()).await {
+                Ok(Ok(raw)) => {
+                    core.on_packet(&raw);
+                    core.drain_api_cmds();
+                    write_reply(core, conn).await;
+                }
+                _ if keepalive.is_some() => {
+                    core.drain_api_cmds();
+                    write_reply(core, conn).await;
+                }
+                _ => {}
             }
         }
     }
@@ -1334,8 +1414,7 @@ where
                 };
                 match attempt {
                     WakeAttempt::Done(Ok(conn)) => {
-                        let addr = conn.address();
-                        core.begin_connection(Some(addr.clone()));
+                        let addr = core.begin_link(&conn);
                         // the belt may have been remote-started meanwhile
                         core.arm_late_credit();
                         tracing::info!(address = %addr, "woken, link established");
@@ -1392,8 +1471,7 @@ where
             };
             match attempt {
                 Some(Ok(conn)) => {
-                    let addr = conn.address();
-                    core.begin_connection(Some(addr.clone()));
+                    let addr = core.begin_link(&conn);
                     tracing::info!(address = %addr, "link established");
                     backoff_s = 1;
                     conn
@@ -1518,8 +1596,7 @@ where
                         };
                         match attempt {
                             Some(Ok(new)) => {
-                                let addr = new.address();
-                                core.begin_connection(Some(addr.clone()));
+                                let addr = core.begin_link(&new);
                                 tracing::info!(address = %addr, "link regained");
                                 conn = new;
                                 regained = true;
@@ -2202,6 +2279,10 @@ mod tests {
         loop_last: bool,
         last: Option<Vec<u8>>,
         pub written: Vec<Vec<u8>>,
+        variant: p::Variant,
+        /// Deadline of the pending notification, kept across a dropped
+        /// call: `Notify` requires cancel-safety (§3.7).
+        next_at: Option<tokio::time::Instant>,
     }
 
     impl FakeConn {
@@ -2211,6 +2292,8 @@ mod tests {
                 loop_last,
                 last: None,
                 written: vec![],
+                variant: p::Variant::PitPat,
+                next_at: None,
             }
         }
     }
@@ -2222,10 +2305,18 @@ mod tests {
 
         async fn disconnect(&mut self) {}
 
+        fn variant(&self) -> p::Variant {
+            self.variant
+        }
+
         async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
             // paused-time tests advance through real waits, like the
             // simulator's 500 ms cycle
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            let at = *self
+                .next_at
+                .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_millis(500));
+            tokio::time::sleep_until(at).await;
+            self.next_at = None;
             let pkt = match self.script.pop_front() {
                 Some(v) => Some(v),
                 None if self.loop_last => self.last.clone(),
@@ -3227,5 +3318,93 @@ mod tests {
         let second = ev_rx.recv().await.unwrap();
         assert_eq!(second.state, State::Running);
         assert!((second.speed_kmh - 2.0).abs() < 1e-9);
+    }
+
+    // ------------------------------------------------------ §3.7 SupeRun
+
+    fn superun_st(seq: u8, belt: p::BeltState, speed: f64, dist: u32, steps: u32) -> Vec<u8> {
+        p::encode_superun_status(seq, belt, speed, speed, dist, steps, 0, 0.0)
+    }
+
+    /// SupeRun links get no reply per notification: a 200 ms timer writes
+    /// framed heartbeats with a per-connection sequence number, and a
+    /// queued command goes out framed on the next tick.
+    #[tokio::test(start_paused = true)]
+    async fn pump_superun_writes_on_timer() {
+        let dir = tmpdir("pump-superun");
+        let t = mkcore(&dir);
+        let (_ctrl_tx, mut ctrl_rx) = mpsc::channel::<Ctrl>(4);
+        let mut conn = FakeConn::new(
+            VecDeque::from([
+                superun_st(1, p::BeltState::Stopped, 0.0, 0, 0),
+                superun_st(2, p::BeltState::Stopped, 0.0, 0, 0),
+            ]),
+            false,
+        );
+        conn.variant = p::Variant::SupeRun;
+        let mut core = t.core;
+        let core = &mut core;
+        assert_eq!(core.begin_link(&conn), "00:11:22:33:44:55");
+        assert_eq!(core.variant(), p::Variant::SupeRun);
+        core.on_packet(&superun_st(0, p::BeltState::Stopped, 0.0, 0, 0));
+        core.queue_api(ApiCmd::Start(Some(2.0))).ok();
+
+        let reason = pump(core, &mut conn, &mut ctrl_rx).await;
+        assert_eq!(reason, DeadReason::Link);
+        // 2 notifications at 500 ms, the link dies at 1.5 s: ~8 ticks
+        assert!(conn.written.len() >= 7, "{} writes", conn.written.len());
+        for (i, w) in conn.written.iter().enumerate() {
+            assert_eq!(&w[..3], &[0x4d, 0x00, i as u8], "frame + seq {i}");
+            assert_eq!(w[3] as usize, w.len() - 4, "frame length");
+        }
+        // the queued start went out first, SupeRun-encoded
+        let start =
+            p::Variant::SupeRun.frame(0, &p::encode_superun_command(p::Command::Start, 2.0));
+        assert_eq!(conn.written[0], start);
+        assert_eq!(&conn.written[1][4..], &p::HEARTBEAT);
+        // a new connection starts the sequence again
+        core.begin_link(&conn);
+        assert_eq!(core.wire(&p::HEARTBEAT)[2], 0);
+    }
+
+    /// SupeRun status frames reach the session in SI units, steps @43 of
+    /// the `68 2f` frames included.
+    #[test]
+    fn superun_session_counters() {
+        let dir = tmpdir("superun-session");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        let mut conn = FakeConn::new(VecDeque::new(), false);
+        conn.variant = p::Variant::SupeRun;
+        c.begin_link(&conn);
+        c.on_packet(&superun_st(1, p::BeltState::Running, 3.0, 0, 0));
+        c.on_packet(&superun_st(2, p::BeltState::Running, 3.0, 110, 150));
+        let ses = c.snapshot().session.expect("session open");
+        assert_eq!((ses.distance_m, ses.steps), (110, 150));
+        assert!((c.speed_kmh - 3.0).abs() < 0.01, "{}", c.speed_kmh);
+        assert!(!c.snapshot().imperial);
+        // a classic packet on a SupeRun link is not decoded
+        c.on_packet(&st(p::BeltState::Running, 5.0, 999, 999, 0, 0.0));
+        assert_eq!(c.snapshot().session.unwrap().distance_m, 110);
+    }
+
+    /// Shutdown on a SupeRun link: the stop goes out on the keep-alive
+    /// timer, without waiting for a notification.
+    #[tokio::test(start_paused = true)]
+    async fn superun_shutdown_sends_stop_on_timer() {
+        let dir = tmpdir("superun-shutdown");
+        let t = mkcore(&dir);
+        let mut core = t.core;
+        let mut conn = FakeConn::new(VecDeque::new(), false);
+        conn.variant = p::Variant::SupeRun;
+        core.begin_link(&conn);
+        core.on_packet(&superun_st(1, p::BeltState::Running, 3.0, 50, 70));
+        assert!(core.moving());
+        let t0 = tokio::time::Instant::now();
+        shutdown_flow(&mut core, &mut conn).await;
+        assert!(!conn.written.is_empty());
+        let stop = p::encode_superun_command(p::Command::Stop, 3.0);
+        assert_eq!(&conn.written[0][4..], &stop, "stop first");
+        assert!(tokio::time::Instant::now() - t0 <= Duration::from_secs(4));
     }
 }

@@ -260,8 +260,15 @@ async fn daemon_main(cfg: config::Config, token: Option<String>) -> ExitCode {
     // simulators's drop flag (§4.7). Everything flows through one task.
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<core::Ctrl>(4);
     let sim_flag = if cfg.simulate {
-        tracing::info!("simulator link enabled (--simulate)");
-        Some(sim::SimLink::new(cfg.weight_kg))
+        let variant = match cfg.simulate_model.as_str() {
+            "superun" => protocol::Variant::SupeRun,
+            _ => protocol::Variant::PitPat,
+        };
+        tracing::info!(
+            model = variant.as_str(),
+            "simulator link enabled (--simulate)"
+        );
+        Some(sim::SimLink::with_variant(cfg.weight_kg, variant))
     } else {
         None
     };

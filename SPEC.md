@@ -389,7 +389,8 @@ On SIGTERM/SIGINT: if the treadmill is running or paused, send **stop** (wait up
 go out via the notification cycle), close the session, persist totals, disconnect, exit 0.
 
 ### 4.7 Simulator (`--simulate`)
-`SimLink` emits a notification every 500 ms. It reacts to the commands like a real treadmill:
+`SimLink` emits a notification every 500 ms (`--simulate-model superun`: framed SupeRun frames,
+§3.7, so the timer keep-alive path is exercised too). It reacts to the commands like a real treadmill:
 start → `starting` for 3 s → `running` with the speed ramping at 0.5 km/h per second to the
 **belt's own default (1.0)** — like the hardware, it ignores the start command's speed field, so
 the daemon's corrective `SetSpeed` is exercised; pause/stop as expected; counters advance from
@@ -418,6 +419,7 @@ No config file.
 | `--default-speed` | `2.0` | km/h |
 | `--presets` | `2,3,4` | km/h, up to 6 values, shown in GUIs |
 | `--simulate` | off | use SimLink |
+| `--simulate-model` | `pitpat` | `pitpat` or `superun` (§3.7) |
 | `--log` | `info` | tracing filter |
 
 The client subcommands accept `--url` (default `http://127.0.0.1:9839`, env `PITPAT_URL`) and

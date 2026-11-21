@@ -652,8 +652,9 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
 - **Version** (R3/S2): `Cargo.toml` holds the last release; build.rs turns a
   checkout's `git describe --tags` into `PITPAT_VERSION` (an env var
   wins, no git falls back to the release version; the build re-runs on
-  `.git/HEAD`, the ref it points to, `.git/refs/tags` and
-  `.git/packed-refs`, so a new tag updates the version too), while the flake
+  the git-provided `HEAD` path and the `refs/heads` and `refs/tags`
+  directories and `packed-refs` in the common dir, so a new tag or commit
+  updates the version, and a packed-refs tree does not rebuild forever), while the flake
   hands `"<version>-g<hash>"` (`-dirty` on a dirty tree) to both packages since
   a store copy has no `.git`; `nix/plasmoid.nix` rewrites the installed plasmoid's
   `metadata.json` version with `jq`. The committed `metadata.json` keeps the

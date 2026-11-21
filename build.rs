@@ -33,16 +33,16 @@ fn main() {
         return;
     };
     let common = git_out(&["rev-parse", "--git-common-dir"]).unwrap_or_else(|| ".git".into());
-    // S2: the version changes with the commit (HEAD plus the ref it
-    // points to) AND with the nearest tag, which tag creation/deletion
-    // moves without touching HEAD — so the tag files must also trigger
-    // a rebuild, or the version goes stale after a release
+    // S2: the version changes with the commit (HEAD) AND with the
+    // nearest tag, which tag creation/deletion moves without touching
+    // HEAD — so the tag files must also trigger a rebuild, or the
+    // version goes stale after a release
     println!("cargo:rerun-if-changed={head_path}");
-    if let Ok(head) = std::fs::read_to_string(&head_path) {
-        if let Some(r) = head.trim().strip_prefix("ref: ") {
-            println!("cargo:rerun-if-changed={common}/{r}");
-        }
-    }
+    // U1: watch the branches DIRECTORY, not the ref file: `git pack-refs`
+    // (git gc runs it now and then) removes the loose file, and a missing
+    // watched path makes cargo rebuild on every build. Cargo scans a
+    // directory recursively, so a created file counts too.
+    println!("cargo:rerun-if-changed={common}/refs/heads");
     println!("cargo:rerun-if-changed={common}/refs/tags");
     println!("cargo:rerun-if-changed={common}/packed-refs");
     let version = env::var("PITPAT_VERSION")

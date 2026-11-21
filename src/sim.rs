@@ -579,12 +579,12 @@ mod tests {
             .await
             .unwrap();
         c.write_packet(&SupeRun.frame(0, &HEARTBEAT)).await.unwrap();
-        let st = SupeRun.decode_status(&c.recv_notification().await.unwrap());
+        let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap());
         assert_eq!(st.unwrap().belt_state(), BeltState::Stopped);
         c.write_packet(&cmd(1, Command::Start, 3.0)).await.unwrap();
         let mut running = false;
         for _ in 0..20 {
-            let st = SupeRun.decode_status(&c.recv_notification().await.unwrap());
+            let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap());
             if st.unwrap().belt_state() == BeltState::Running {
                 running = true;
                 break;
@@ -595,9 +595,7 @@ mod tests {
             .await
             .unwrap();
         for _ in 0..60 {
-            let st = SupeRun
-                .decode_status(&c.recv_notification().await.unwrap())
-                .unwrap();
+            let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap()).unwrap();
             if (st.speed_mps * 3.6 - 3.0).abs() < 0.01 {
                 assert!((st.target_speed_kmh - 3.0).abs() < 0.01);
                 return;

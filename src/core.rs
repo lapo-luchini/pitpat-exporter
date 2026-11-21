@@ -616,7 +616,7 @@ impl Core {
     /// no state change; the caller still replies with cmd/heartbeat.
     pub fn on_packet(&mut self, raw: &[u8]) {
         self.metrics.last_notification.set(unix_now());
-        let Some(st) = self.variant.decode_status(raw) else {
+        let Some(st) = p::decode_status(raw) else {
             self.metrics.invalid_packets_total.inc_by(1);
             tracing::debug!(bytes = %hex(raw), "undecodable status notification");
             return;
@@ -3383,9 +3383,43 @@ mod tests {
         assert_eq!((ses.distance_m, ses.steps), (110, 150));
         assert!((c.speed_kmh - 3.0).abs() < 0.01, "{}", c.speed_kmh);
         assert!(!c.snapshot().imperial);
-        // a classic packet on a SupeRun link is not decoded
-        c.on_packet(&st(p::BeltState::Running, 5.0, 999, 999, 0, 0.0));
-        assert_eq!(c.snapshot().session.unwrap().distance_m, 110);
+    }
+
+    /// Frames say which family they are (§3.2a): a T01 frame decodes
+    /// without a SupeRun link, as in a replay with no BLE.
+    #[test]
+    fn superun_frame_decodes_by_header() {
+        let dir = tmpdir("superun-header");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        c.begin_connection(None);
+        c.on_packet(&superun_st(1, p::BeltState::Running, 3.0, 110, 150));
+        assert_eq!(c.metrics.invalid_packets_total.get(), 0);
+        let ses = c.snapshot().session.expect("session open");
+        assert_eq!((ses.distance_m, ses.steps), (110, 150));
+    }
+
+    /// A truncated, mis-sized or merged T01 notification is counted
+    /// invalid instead of being decoded from shifted offsets (§3.7).
+    #[test]
+    fn superun_short_or_mis_sized_frames_invalid() {
+        let dir = tmpdir("superun-strict");
+        let mut t = mkcore(&dir);
+        let c = &mut t.core;
+        let mut conn = FakeConn::new(VecDeque::new(), false);
+        conn.variant = p::Variant::SupeRun;
+        c.begin_link(&conn);
+        c.on_packet(&superun_st(1, p::BeltState::Running, 3.0, 110, 150));
+        let good = superun_st(2, p::BeltState::Running, 3.0, 120, 160);
+        let mut wrong_len = good.clone();
+        wrong_len[3] = 0x2e;
+        let merged = [good.clone(), good.clone()].concat();
+        for bad in [good[..48].to_vec(), wrong_len, merged] {
+            c.on_packet(&bad);
+        }
+        assert_eq!(c.metrics.invalid_packets_total.get(), 3);
+        let ses = c.snapshot().session.expect("session open");
+        assert_eq!((ses.distance_m, ses.steps), (110, 150));
     }
 
     /// Shutdown on a SupeRun link: the stop goes out on the keep-alive

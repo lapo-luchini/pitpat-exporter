@@ -161,9 +161,12 @@ accounting in, then keeps the values mirrored while running.
 
 The decoder is behind a per-model boundary (`FrameDecoder` in
 `protocol.rs`): one implementation per frame layout, picked from the
-frame header — `68 32`/`68 34` select `DeviceA`; a packet with any other
+frame header — `68 32`/`68 34` select `DeviceA`; `4d 04 <seq> 2f` around
+an inner `68 2f` selects `SupeRunT01` (§3.7); a packet with any other
 header is rejected (logged as invalid), so the daemon never invents a
-layout it has not seen. A second treadmill model gets its own
+layout it has not seen. Frames say which family they are: the decoder
+does not depend on the link, so captures replay without BLE and the
+debug log's `model=` field names the decoder that read the frame. A second treadmill model gets its own
 implementation plus its own replay tests, without touching device-a's.
 
 Real logs from PitPat treadmills live in `tests/captures/` (one folder
@@ -256,7 +259,8 @@ connecting: `fba0` → §3.1–3.6 unchanged; otherwise `ffff` → this section.
   matches by name (§4.1).
 - **Framing:** every packet, both ways, is wrapped as `4d 00 <seq> <len>` + packet (the
   treadmill's own frames start `4d 04`). `seq` is a u8 that starts at 0 on every connection and
-  wraps; `len` is the inner length.
+  wraps; `len` is the inner length. A notification whose second byte is not `04` or whose `len`
+  is not its length minus 4 (truncated, or two frames merged) is invalid (§3.2).
 - **Keep-alive:** the host writes on a **fixed 200 ms timer**, never in reply to a notification:
   the next queued command if there is one, otherwise the framed heartbeat
   `4d 00 <seq> 05 6a 05 fd f8 43`. The §3.5 retry rule is unchanged (retries go out on the next
@@ -269,8 +273,10 @@ connecting: `fba0` → §3.1–3.6 unchanged; otherwise `ffff` → this section.
   byte as §3.3.
 - **Status:** a 47-byte `68 2f` frame with the §3.2 offsets, except: speeds (@3, @5) are
   **mph × 1600**, and distance (@7) is **metres** although the flags byte has the imperial bit set.
-  Steps are u16 @43 in these frames too. The decoder normalises to SI, rounds speeds to 0.01 km/h
-  (so a commanded 0.1-step speed reads back exactly, §3.6) and clears the imperial bit.
+  Steps are u16 @43 in these frames too. It is read by the `SupeRunT01` decoder (§3.2a), which
+  normalises to SI, rounds speeds to 0.01 km/h (so a commanded 0.1-step speed reads back exactly,
+  §3.6) and clears the imperial bit. The other differences (UUIDs, keep-alive, command encoding,
+  framing) belong to the link: `Variant` in `protocol.rs`.
 
 Golden vectors (seq as shown, speeds in km/h):
 

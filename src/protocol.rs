@@ -27,7 +27,6 @@ pub const SUPERUN_NOTIFY_UUID: bluer::Uuid =
 /// notification, the host writes on a fixed timer instead (§3.7).
 pub const SUPERUN_KEEPALIVE: std::time::Duration = std::time::Duration::from_millis(200);
 
-const MPH_TO_MPS: f64 = 0.44704;
 const MI_TO_KM: f64 = 1.609344;
 
 /// Which protocol family the connected treadmill speaks (§3.7).
@@ -91,14 +90,6 @@ impl Variant {
         match self {
             Variant::PitPat => pkt.to_vec(),
             Variant::SupeRun => superun_frame(seq, pkt),
-        }
-    }
-
-    /// Decode a notification exactly as received from the treadmill.
-    pub fn decode_status(self, raw: &[u8]) -> Option<Status> {
-        match self {
-            Variant::PitPat => decode_status(raw),
-            Variant::SupeRun => decode_superun_status(raw),
         }
     }
 }
@@ -273,12 +264,50 @@ impl FrameDecoder for UnknownModel {
     }
 }
 
-/// Pick the decoder from the frame header (`68 32`/`68 34` → device-a).
-/// A new header from another model gets its own arm here, together with
-/// its implementation and capture.
+/// SupeRun-built PitPat-T01 (§3.7): `4d 04 <seq> 2f` frames around a
+/// 47-byte `68 2f` packet with the §3.2 offsets, speeds in mph × 1600,
+/// distance in metres although the imperial bit is set.
+pub struct SupeRunT01;
+
+impl FrameDecoder for SupeRunT01 {
+    fn name(&self) -> &'static str {
+        "superun-t01"
+    }
+
+    /// The values come out in SI and the imperial bit is cleared, so
+    /// nothing downstream converts them again. Speeds are rounded to
+    /// 0.01 km/h: a commanded 3.0 km/h comes back as 3.0005 from
+    /// mph × 1600, and the §3.6 reassertion compares exactly.
+    fn decode_status(&self, raw: &[u8]) -> Option<Status> {
+        // `4d 04`: the treadmill's own frames (the host's are `4d 00`)
+        if raw.get(1) != Some(&0x04) {
+            return None;
+        }
+        let pkt = superun_unframe(raw)?;
+        if pkt.len() < 45 || pkt[..2] != [0x68, 0x2f] {
+            return None;
+        }
+        let mut st = DeviceA.decode_status(pkt)?;
+        let be16 = |i: usize| u16::from_be_bytes([pkt[i], pkt[i + 1]]);
+        let kmh = |i: usize| (be16(i) as f64 / 1600.0 * MI_TO_KM * 100.0).round() / 100.0;
+        st.speed_mps = kmh(3) / 3.6;
+        st.target_speed_kmh = kmh(5);
+        st.distance_m = u32::from_be_bytes([pkt[7], pkt[8], pkt[9], pkt[10]]);
+        // K7 for this model: the running frames carry steps at u16 @43
+        st.steps = Some(u32::from(be16(43)));
+        st.flags &= !0x80;
+        Some(st)
+    }
+}
+
+/// Pick the decoder from the frame header: `68 32`/`68 34` → device-a,
+/// `4d 04 <seq> 2f` around `68 2f` → superun-t01. A new header from
+/// another model gets its own arm here, together with its implementation
+/// and capture.
 pub fn decoder_for(pkt: &[u8]) -> &'static dyn FrameDecoder {
-    match (pkt.first(), pkt.get(1)) {
-        (Some(&0x68), Some(&0x32) | Some(&0x34)) => &DeviceA,
+    match pkt {
+        [0x68, 0x32 | 0x34, ..] => &DeviceA,
+        [0x4d, 0x04, _, 0x2f, 0x68, 0x2f, ..] => &SupeRunT01,
         _ => &UnknownModel,
     }
 }
@@ -301,10 +330,14 @@ pub fn superun_frame(seq: u8, pkt: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The packet inside a SupeRun frame; `None` if `raw` is not framed.
-/// The treadmill's own frames start `4d 04 <seq> <len>`.
+/// The packet inside a SupeRun frame `4d <dir> <seq> <len>`; `None` if
+/// `raw` is not framed or `len` is not the inner length, so a truncated
+/// or merged notification is rejected instead of read at shifted offsets.
 pub fn superun_unframe(raw: &[u8]) -> Option<&[u8]> {
-    (raw.len() >= 4 && raw[0] == 0x4d).then(|| &raw[4..])
+    match raw {
+        [0x4d, _, _, len, inner @ ..] if *len as usize == inner.len() => Some(inner),
+        _ => None,
+    }
 }
 
 /// Encode a SupeRun 23-byte command packet (unframed, §3.7): same 6a…43
@@ -340,26 +373,6 @@ pub fn encode_superun_command(command: Command, speed_kmh: f64) -> [u8; 23] {
     p[21] = p[1..21].iter().fold(0u8, |acc, &b| acc ^ b);
     p[22] = 0x43;
     p
-}
-
-/// Decode a framed SupeRun status notification (§3.7). The inner packet
-/// has the §3.2 layout, but speeds are mph × 1600 and distance is metres
-/// even though the T01 sets the imperial flag: values come out in SI and
-/// the flag is cleared, so nothing downstream converts them again.
-/// Speeds are rounded to 0.01 km/h: a commanded 3.0 km/h comes back as
-/// 3.0005 from mph × 1600, and the §3.6 reassertion compares exactly.
-pub fn decode_superun_status(raw: &[u8]) -> Option<Status> {
-    let pkt = superun_unframe(raw)?;
-    let mut st = decode_status(pkt)?;
-    let kmh = |i: usize| {
-        let mph1600 = u16::from_be_bytes([pkt[i], pkt[i + 1]]) as f64;
-        (mph1600 / 1600.0 * MI_TO_KM * 100.0).round() / 100.0
-    };
-    st.speed_mps = kmh(3) / 3.6;
-    st.target_speed_kmh = kmh(5);
-    st.distance_m = u32::from_be_bytes([pkt[7], pkt[8], pkt[9], pkt[10]]);
-    st.flags &= !0x80;
-    Some(st)
 }
 
 /// Build a 47-byte SupeRun `68 2f` status frame, framed as the treadmill
@@ -562,8 +575,9 @@ mod tests {
         let b = hex(
             "4d 04 08 2f 68 2f 00 08 fc 08 fc 00 00 00 6e 00 00 00 00 00 00 00 00 09 00 02 98 10 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e8 f8 43",
         );
-        let a = Variant::SupeRun.decode_status(&a).unwrap();
-        let b = Variant::SupeRun.decode_status(&b).unwrap();
+        assert_eq!(decoder_for(&a).name(), "superun-t01");
+        let a = decode_status(&a).unwrap();
+        let b = decode_status(&b).unwrap();
         assert_eq!(a.belt_state(), BeltState::Running);
         assert!(!a.imperial(), "units already normalised");
         assert_eq!((a.steps, b.steps), (Some(213), Some(232)));
@@ -577,7 +591,7 @@ mod tests {
         assert!((a.target_speed_kmh - 2.31).abs() < 0.01);
         assert_eq!(a.kcal, 8);
         // the same bytes are not a valid classic packet's speed/distance
-        assert!(Variant::SupeRun.decode_status(&hex("68 2f 00")).is_none());
+        assert!(decode_status(&hex("68 2f 00")).is_none());
     }
 
     #[test]
@@ -585,19 +599,46 @@ mod tests {
         let raw = encode_superun_status(1, BeltState::Running, 4.0, 4.0, 420, 600, 12, 60.0);
         assert_eq!(&raw[..4], &[0x4d, 0x04, 0x01, 0x2f]);
         assert_eq!(raw.len(), 51);
-        let s = decode_superun_status(&raw).unwrap();
+        let s = decode_status(&raw).unwrap();
         assert!((s.speed_mps * 3.6 - 4.0).abs() < 0.01);
         assert_eq!((s.distance_m, s.steps, s.kcal), (420, Some(600), 12));
-        assert!(decode_superun_status(&raw[4..]).is_none(), "unframed");
+        assert!(decode_status(&raw[4..]).is_none(), "unframed");
         // every speed on the 0.1 km/h grid reads back exactly (§3.6)
         for tenths in 10..=60 {
             let v = tenths as f64 / 10.0;
             let raw = encode_superun_status(1, BeltState::Running, v, v, 0, 0, 0, 0.0);
-            let s = decode_superun_status(&raw).unwrap();
+            let s = decode_status(&raw).unwrap();
             assert!((s.target_speed_kmh - v).abs() < 1e-9, "{v}");
             assert!((s.speed_mps * 3.6 - v).abs() < 1e-9, "{v}");
         }
-        assert!(decode_superun_status(&raw[..14]).is_none(), "short");
+        assert!(decode_status(&raw[..14]).is_none(), "short");
+    }
+
+    /// A truncated frame, a wrong length byte, two frames merged in one
+    /// notification and a host-direction `4d 00` frame are all invalid.
+    #[test]
+    fn superun_unframing_is_strict() {
+        let raw = encode_superun_status(1, BeltState::Running, 3.0, 3.0, 110, 150, 0, 0.0);
+        assert!(decode_status(&raw).is_some());
+        assert!(decode_status(&raw[..48]).is_none(), "short frame");
+        let mut wrong = raw.clone();
+        wrong[3] = 0x2e;
+        assert!(decode_status(&wrong).is_none(), "wrong length byte");
+        assert!(
+            decode_status(&[raw.clone(), raw.clone()].concat()).is_none(),
+            "merged"
+        );
+        let mut host = raw.clone();
+        host[1] = 0x00;
+        assert!(decode_status(&host).is_none(), "host frame");
+        assert!(
+            SupeRunT01.decode_status(&host).is_none(),
+            "host frame, direct"
+        );
+        assert_eq!(
+            superun_unframe(&superun_frame(3, &HEARTBEAT)),
+            Some(&HEARTBEAT[..])
+        );
     }
 
     #[test]

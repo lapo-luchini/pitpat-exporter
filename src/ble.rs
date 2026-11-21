@@ -307,41 +307,98 @@ async fn scan_and_connect(adapter: &Adapter) -> Result<Device, LinkError> {
         ..Default::default()
     };
     adapter.set_discovery_filter(filter).await.map_err(perr)?;
-    let events = discovery_events(adapter).await?;
-    pin_mut!(events);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(DISCOVERY_S);
-    let mut unnamed: HashSet<Address> = HashSet::new();
-    let result = 'scan: loop {
-        let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), events.next()).await
-        else {
-            if tokio::time::Instant::now() >= deadline {
-                tracing::warn!(secs = DISCOVERY_S, "no PitPat advertisement seen in time");
-                break Err(LinkError::NotFound);
+    let events = discovery_events(adapter)
+        .await?
+        .filter_map(|ev| async move {
+            match ev {
+                AdapterEvent::DeviceAdded(addr) => Some(addr),
+                _ => None,
             }
-            for addr in &unnamed {
-                if let Ok(dev) = adapter.device(*addr) {
-                    if is_treadmill(&dev).await {
-                        break 'scan Ok(dev);
+        });
+    let window = Duration::from_secs(DISCOVERY_S);
+    let Some(addr) = scan_loop(events, window, |addr| probe(adapter, addr)).await else {
+        tracing::warn!(secs = DISCOVERY_S, "no PitPat advertisement seen in time");
+        return Err(LinkError::NotFound);
+    };
+    let dev = adapter.device(addr).map_err(perr)?;
+    connect_with_retries(&dev).await.map_err(perr)?;
+    Ok(dev)
+}
+
+/// What one look at a discovered device found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    Treadmill,
+    /// No name yet (it may come later in a scan response): look again.
+    Unnamed,
+    Other,
+}
+
+async fn probe(adapter: &Adapter, addr: Address) -> Probe {
+    let Ok(dev) = adapter.device(addr) else {
+        return Probe::Other;
+    };
+    if is_treadmill(&dev).await {
+        Probe::Treadmill
+    } else if dev.name().await.ok().flatten().is_none() {
+        Probe::Unnamed
+    } else {
+        Probe::Other
+    }
+}
+
+/// How often devices seen without a name are looked at again.
+const RECHECK: Duration = Duration::from_secs(1);
+
+/// The scan proper, apart from BlueZ so it can be tested: probe every
+/// device the stream reports, re-probe the unnamed ones on their own 1 s
+/// schedule, and give up after `window`. Both clocks are checked on every
+/// pass, so a stream that never pauses (no UUID filter, busy neighbours)
+/// can neither keep the scan alive forever nor starve the re-checks.
+/// Returns the first treadmill found.
+async fn scan_loop<A, S, F, Fut>(events: S, window: Duration, mut probe: F) -> Option<A>
+where
+    A: Copy + Eq + std::hash::Hash,
+    S: Stream<Item = A>,
+    F: FnMut(A) -> Fut,
+    Fut: std::future::Future<Output = Probe>,
+{
+    pin_mut!(events);
+    let deadline = tokio::time::sleep(window);
+    pin_mut!(deadline);
+    let mut recheck = tokio::time::interval(RECHECK);
+    recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut unnamed: HashSet<A> = HashSet::new();
+    let mut ended = false;
+    loop {
+        tokio::select! {
+            biased;
+            () = &mut deadline => return None,
+            _ = recheck.tick() => {
+                for addr in unnamed.clone() {
+                    match probe(addr).await {
+                        Probe::Treadmill => return Some(addr),
+                        Probe::Unnamed => {}
+                        // named now, and not ours: no need to look again
+                        Probe::Other => {
+                            unnamed.remove(&addr);
+                        }
                     }
                 }
             }
-            continue;
-        };
-        if let AdapterEvent::DeviceAdded(addr) = event {
-            let Ok(dev) = adapter.device(addr) else {
-                continue;
-            };
-            if is_treadmill(&dev).await {
-                break Ok(dev);
-            }
-            if dev.name().await.ok().flatten().is_none() {
-                unnamed.insert(addr);
-            }
+            ev = events.next(), if !ended => match ev {
+                // the stream ended: only the re-checks and the deadline are left
+                None => ended = true,
+                Some(addr) => match probe(addr).await {
+                    Probe::Treadmill => return Some(addr),
+                    Probe::Unnamed => {
+                        unnamed.insert(addr);
+                    }
+                    Probe::Other => {}
+                },
+            },
         }
-    };
-    let dev = result?;
-    connect_with_retries(&dev).await.map_err(perr)?;
-    Ok(dev)
+    }
 }
 
 async fn connect_with_retries(device: &Device) -> bluer::Result<()> {
@@ -463,5 +520,49 @@ impl BleConn {
                 self.write_char.write_ext(pkt, &command).await.map_err(perr)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::Instant;
+
+    /// Busy neighbours: a new device every 500 ms, none of them ours.
+    fn busy(first: u32) -> impl Stream<Item = u32> {
+        futures::stream::unfold(first, |n| async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            Some((n, n + 1))
+        })
+    }
+
+    /// The 10 s window ends even when events never pause for 1 s.
+    #[tokio::test(start_paused = true)]
+    async fn scan_times_out_with_busy_neighbours() {
+        let t0 = Instant::now();
+        let scan = scan_loop(busy(1), Duration::from_secs(10), |_| async { Probe::Other });
+        let found = tokio::time::timeout(Duration::from_secs(60), scan).await;
+        assert_eq!(found, Ok(None), "the scan must give up, not run forever");
+        assert!(Instant::now() - t0 <= Duration::from_secs(11));
+    }
+
+    /// A T01 seen first without a name is looked at again every second,
+    /// even while other devices keep arriving, and found once its name
+    /// is known.
+    #[tokio::test(start_paused = true)]
+    async fn unnamed_device_rechecked_while_busy() {
+        let t0 = Instant::now();
+        let named_at = t0 + Duration::from_secs(3);
+        let events = futures::stream::iter([0]).chain(busy(1));
+        let scan = scan_loop(events, Duration::from_secs(10), |addr| async move {
+            match addr {
+                0 if Instant::now() >= named_at => Probe::Treadmill,
+                0 => Probe::Unnamed,
+                _ => Probe::Other,
+            }
+        });
+        let found = tokio::time::timeout(Duration::from_secs(60), scan).await;
+        assert_eq!(found, Ok(Some(0)));
+        assert!(Instant::now() - t0 <= Duration::from_secs(5));
     }
 }

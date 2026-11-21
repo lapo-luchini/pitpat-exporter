@@ -111,6 +111,8 @@ the write characteristic: the next queued command if there is one, otherwise the
 `6a 05 fd f8 43`. Commands are *only* sent this way (never spontaneously). The notification rate is
 whatever the treadmill uses (expected ~1–2 Hz); log it at debug level.
 
+SupeRun-built models use service `ffff` and a timer keep-alive instead: see §3.7.
+
 ### 3.2 Status notification (treadmill → host)
 
 Packets shorter than 31 bytes are **invalid**: log at debug level, count them in
@@ -236,6 +238,49 @@ The reference implementation holds one pending packet and silently drops older o
   `SetSpeed(v)` (timed retries, at most 3), and suppress the settle-sync until the belt reports
   `v` (at most ~10 s), so the remote pickup doesn't erase the user's speed. Resume from paused
   honours the Start speed and the reassertion stays silent.
+
+### 3.7 SupeRun-built models (e.g. `PitPat-T01`)
+
+Some PitPat pads are built by SupeRun and speak a framed variant of the same protocol
+(reverse-engineered by [hdxsfbr/walkingpad](https://github.com/hdxsfbr/walkingpad); checked on a
+`PitPat-T01`, Nov 18 trace). The daemon picks the variant from the GATT services after
+connecting: `fba0` → §3.1–3.6 unchanged; otherwise `ffff` → this section.
+
+| Item | UUID |
+|---|---|
+| Service | `0000ffff-0000-1000-8000-00805f9b34fb` |
+| Write characteristic (commands) | `0000ff01-0000-1000-8000-00805f9b34fb` |
+| Notify characteristic (status) | `0000ff02-0000-1000-8000-00805f9b34fb` |
+
+- **Advertising:** no service UUID, only the name (`PitPat…` / `PITPAT…`), so discovery also
+  matches by name (§4.1).
+- **Framing:** every packet, both ways, is wrapped as `4d 00 <seq> <len>` + packet (the
+  treadmill's own frames start `4d 04`). `seq` is a u8 that starts at 0 on every connection and
+  wraps; `len` is the inner length.
+- **Keep-alive:** the host writes on a **fixed 200 ms timer**, never in reply to a notification:
+  the next queued command if there is one, otherwise the framed heartbeat
+  `4d 00 <seq> 05 6a 05 fd f8 43`. The §3.5 retry rule is unchanged (retries go out on the next
+  tick, re-framed with a new `seq`). Writes are Write Requests when the characteristic allows
+  them, Write Commands otherwise.
+- **Commands:** the §3.3 shape with these differences: speed (6–7) is **mph × 1600**, `0` for
+  stop; byte 8 is `0x01` for set-speed and `0x05` for start / pause / stop; byte 10 is `0x58`
+  (fixed, like the reference controller); byte 12 is `0x0c` start or set-speed, `0x0a` pause,
+  `0x08` stop; bytes 13–20 are `00 00 00 00 00 0c 55 70` (all zero for stop); checksum and end
+  byte as §3.3.
+- **Status:** a 47-byte `68 2f` frame with the §3.2 offsets, except: speeds (@3, @5) are
+  **mph × 1600**, and distance (@7) is **metres** although the flags byte has the imperial bit set.
+  Steps are u16 @43 in these frames too. The decoder normalises to SI, rounds speeds to 0.01 km/h
+  (so a commanded 0.1-step speed reads back exactly, §3.6) and clears the imperial bit.
+
+Golden vectors (seq as shown, speeds in km/h):
+
+```
+heartbeat (seq 7)      4d 00 07 05 6a 05 fd f8 43
+start     2.0 (seq 3)  4d 00 03 17 6a 17 00 00 00 00 07 c4 05 00 58 00 0c 00 00 00 00 00 0c 55 70 ac 43
+set_speed 4.5 (seq 4)  4d 00 04 17 6a 17 00 00 00 00 11 7a 01 00 58 00 0c 00 00 00 00 00 0c 55 70 00 43
+pause     3.0 (seq 5)  4d 00 05 17 6a 17 00 00 00 00 0b a7 05 00 58 00 0a 00 00 00 00 00 0c 55 70 c5 43
+stop          (seq 6)  4d 00 06 17 6a 17 00 00 00 00 00 00 05 00 58 00 08 00 00 00 00 00 00 00 00 42 43
+```
 
 ---
 

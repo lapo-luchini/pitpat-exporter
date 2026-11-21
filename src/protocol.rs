@@ -13,6 +13,96 @@ pub const WRITE_UUID: bluer::Uuid =
 pub const NOTIFY_UUID: bluer::Uuid =
     bluer::Uuid::from_u128(0x0000_fba2_0000_1000_8000_0080_5f9b_34fb);
 
+/// SupeRun-built models (e.g. "PitPat-T01"): service ffff (§3.7).
+pub const SUPERUN_SERVICE_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_ffff_0000_1000_8000_0080_5f9b_34fb);
+/// SupeRun command write characteristic.
+pub const SUPERUN_WRITE_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_ff01_0000_1000_8000_0080_5f9b_34fb);
+/// SupeRun status notify characteristic.
+pub const SUPERUN_NOTIFY_UUID: bluer::Uuid =
+    bluer::Uuid::from_u128(0x0000_ff02_0000_1000_8000_0080_5f9b_34fb);
+
+/// SupeRun keep-alive period: these models are not replied to per
+/// notification, the host writes on a fixed timer instead (§3.7).
+pub const SUPERUN_KEEPALIVE: std::time::Duration = std::time::Duration::from_millis(200);
+
+const MPH_TO_MPS: f64 = 0.44704;
+const MI_TO_KM: f64 = 1.609344;
+
+/// Which protocol family the connected treadmill speaks (§3.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Variant {
+    /// The original PitPat: service fba0, bare packets, one reply per
+    /// notification (§3.1).
+    #[default]
+    PitPat,
+    /// SupeRun-built PitPat models (e.g. "PitPat-T01"): service ffff,
+    /// every packet framed as `4d 00 <seq> <len>`, a 200 ms timer
+    /// keep-alive, speed in mph × 1600 (§3.7).
+    SupeRun,
+}
+
+impl Variant {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Variant::PitPat => "pitpat",
+            Variant::SupeRun => "superun",
+        }
+    }
+
+    /// (service, write, notify) characteristic UUIDs.
+    pub fn uuids(self) -> (bluer::Uuid, bluer::Uuid, bluer::Uuid) {
+        match self {
+            Variant::PitPat => (SERVICE_UUID, WRITE_UUID, NOTIFY_UUID),
+            Variant::SupeRun => (
+                SUPERUN_SERVICE_UUID,
+                SUPERUN_WRITE_UUID,
+                SUPERUN_NOTIFY_UUID,
+            ),
+        }
+    }
+
+    /// `None`: reply once per notification (§3.1); `Some(p)`: write on a
+    /// timer every `p`, never in reply to a notification (§3.7).
+    pub fn keepalive(self) -> Option<std::time::Duration> {
+        match self {
+            Variant::PitPat => None,
+            Variant::SupeRun => Some(SUPERUN_KEEPALIVE),
+        }
+    }
+
+    /// The (unframed) command packet for this variant.
+    pub fn encode_command(
+        self,
+        command: Command,
+        speed_kmh: f64,
+        weight_kg: u8,
+        user_id: u64,
+    ) -> [u8; 23] {
+        match self {
+            Variant::PitPat => encode_command(command, speed_kmh, weight_kg, user_id),
+            Variant::SupeRun => encode_superun_command(command, speed_kmh),
+        }
+    }
+
+    /// Wrap an outgoing packet (command or heartbeat) for the wire.
+    pub fn frame(self, seq: u8, pkt: &[u8]) -> Vec<u8> {
+        match self {
+            Variant::PitPat => pkt.to_vec(),
+            Variant::SupeRun => superun_frame(seq, pkt),
+        }
+    }
+
+    /// Decode a notification exactly as received from the treadmill.
+    pub fn decode_status(self, raw: &[u8]) -> Option<Status> {
+        match self {
+            Variant::PitPat => decode_status(raw),
+            Variant::SupeRun => decode_superun_status(raw),
+        }
+    }
+}
+
 /// Command packet (host → treadmill), 23 bytes (§3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -201,6 +291,103 @@ pub fn decode_status(pkt: &[u8]) -> Option<Status> {
     decoder_for(pkt).decode_status(pkt)
 }
 
+// ------------------------------------------------------------ SupeRun
+
+/// Frame an outgoing SupeRun packet: `4d 00 <seq> <len>` + packet (§3.7).
+pub fn superun_frame(seq: u8, pkt: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pkt.len() + 4);
+    out.extend_from_slice(&[0x4d, 0x00, seq, pkt.len() as u8]);
+    out.extend_from_slice(pkt);
+    out
+}
+
+/// The packet inside a SupeRun frame; `None` if `raw` is not framed.
+/// The treadmill's own frames start `4d 04 <seq> <len>`.
+pub fn superun_unframe(raw: &[u8]) -> Option<&[u8]> {
+    (raw.len() >= 4 && raw[0] == 0x4d).then(|| &raw[4..])
+}
+
+/// Encode a SupeRun 23-byte command packet (unframed, §3.7): same 6a…43
+/// shape as §3.3, but speed is mph × 1600, byte 8 is `0x01` for
+/// set-speed and `0x05` otherwise, byte 12 is `0x0c` start/set-speed,
+/// `0x0a` pause, `0x08` stop, and the user ID slot carries a constant.
+/// The weight byte is fixed at `0x58` like the reference controller.
+pub fn encode_superun_command(command: Command, speed_kmh: f64) -> [u8; 23] {
+    let speed = if command == Command::Stop {
+        0
+    } else {
+        (speed_kmh / MI_TO_KM * 1600.0).round().clamp(0.0, 65535.0) as u16
+    };
+    let mut p = [0x00; 23];
+    p[0] = 0x6a;
+    p[1] = 0x17;
+    p[6] = (speed >> 8) as u8;
+    p[7] = speed as u8;
+    p[8] = if command == Command::SetSpeed {
+        0x01
+    } else {
+        0x05
+    };
+    p[10] = 0x58;
+    p[12] = match command {
+        Command::Start | Command::SetSpeed => 0x0c,
+        Command::Pause => 0x0a,
+        Command::Stop => 0x08,
+    };
+    if command != Command::Stop {
+        p[17..21].copy_from_slice(&[0x00, 0x0c, 0x55, 0x70]);
+    }
+    p[21] = p[1..21].iter().fold(0u8, |acc, &b| acc ^ b);
+    p[22] = 0x43;
+    p
+}
+
+/// Decode a framed SupeRun status notification (§3.7). The inner packet
+/// has the §3.2 layout, but speeds are mph × 1600 and distance is metres
+/// even though the T01 sets the imperial flag: values come out in SI and
+/// the flag is cleared, so nothing downstream converts them again.
+/// Speeds are rounded to 0.01 km/h: a commanded 3.0 km/h comes back as
+/// 3.0005 from mph × 1600, and the §3.6 reassertion compares exactly.
+pub fn decode_superun_status(raw: &[u8]) -> Option<Status> {
+    let pkt = superun_unframe(raw)?;
+    let mut st = decode_status(pkt)?;
+    let kmh = |i: usize| {
+        let mph1600 = u16::from_be_bytes([pkt[i], pkt[i + 1]]) as f64;
+        (mph1600 / 1600.0 * MI_TO_KM * 100.0).round() / 100.0
+    };
+    st.speed_mps = kmh(3) / 3.6;
+    st.target_speed_kmh = kmh(5);
+    st.distance_m = u32::from_be_bytes([pkt[7], pkt[8], pkt[9], pkt[10]]);
+    st.flags &= !0x80;
+    Some(st)
+}
+
+/// Build a 47-byte SupeRun `68 2f` status frame, framed as the treadmill
+/// sends it (simulator and tests).
+#[allow(clippy::too_many_arguments)]
+pub fn encode_superun_status(
+    seq: u8,
+    belt: BeltState,
+    speed_kmh: f64,
+    target_speed_kmh: f64,
+    distance_m: u32,
+    steps: u32,
+    kcal: u16,
+    duration_s: f64,
+) -> Vec<u8> {
+    let full = encode_status(belt, false, 0.0, 0.0, distance_m, steps, kcal, duration_s);
+    let mut p = full[..47].to_vec();
+    p[1] = 0x2f;
+    let mph1600 = |v: f64| (v / MI_TO_KM * 1600.0).round().clamp(0.0, 65535.0) as u16;
+    p[3..5].copy_from_slice(&mph1600(speed_kmh).to_be_bytes());
+    p[5..7].copy_from_slice(&mph1600(target_speed_kmh).to_be_bytes());
+    p[26] |= 0x80; // the T01 reports imperial, its units are fixed anyway
+    p[46] = 0x43;
+    let mut raw = superun_frame(seq, &p);
+    raw[1] = 0x04;
+    raw
+}
+
 /// Build a 31-byte status notification (used by the simulator and tests).
 #[allow(clippy::too_many_arguments)]
 pub fn encode_status(
@@ -336,6 +523,81 @@ mod tests {
         assert!((s.speed_mps - 2.0 * 0.44704).abs() < 0.001);
         // 1 mi of distance read back in metres
         assert!((s.distance_m as f64 - 1609.344).abs() < 2.0);
+    }
+
+    // SupeRun golden packets, from the reference controller
+    // (hdxsfbr/walkingpad pitpat_controller/protocol.py), speeds in km/h
+    #[test]
+    fn superun_golden_vectors() {
+        let v = Variant::SupeRun;
+        let w = |seq, c, kmh| v.frame(seq, &v.encode_command(c, kmh, WEIGHT, USER_ID));
+        assert_eq!(v.frame(7, &HEARTBEAT), hex("4d 00 07 05 6a 05 fd f8 43"));
+        assert_eq!(
+            w(3, Command::Start, 2.0),
+            hex("4d 00 03 17 6a 17 00 00 00 00 07 c4 05 00 58 00 0c 00 00 00 00 00 0c 55 70 ac 43")
+        );
+        assert_eq!(
+            w(4, Command::SetSpeed, 4.5),
+            hex("4d 00 04 17 6a 17 00 00 00 00 11 7a 01 00 58 00 0c 00 00 00 00 00 0c 55 70 00 43")
+        );
+        assert_eq!(
+            w(5, Command::Pause, 3.0),
+            hex("4d 00 05 17 6a 17 00 00 00 00 0b a7 05 00 58 00 0a 00 00 00 00 00 0c 55 70 c5 43")
+        );
+        assert_eq!(
+            w(6, Command::Stop, 3.0),
+            hex("4d 00 06 17 6a 17 00 00 00 00 00 00 05 00 58 00 08 00 00 00 00 00 00 00 00 42 43")
+        );
+        // the classic variant is unchanged and unframed
+        assert_eq!(Variant::PitPat.frame(9, &HEARTBEAT), HEARTBEAT.to_vec());
+    }
+
+    /// Two real PitPat-T01 notifications (2026-11-18 trace, 20 counted
+    /// steps between them; the count started just after a step).
+    #[test]
+    fn superun_t01_trace() {
+        let a = hex(
+            "4d 04 ea 2f 68 2f 00 08 fc 08 fc 00 00 00 64 00 00 00 00 00 00 00 00 08 00 02 59 90 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d5 8f 43",
+        );
+        let b = hex(
+            "4d 04 08 2f 68 2f 00 08 fc 08 fc 00 00 00 6e 00 00 00 00 00 00 00 00 09 00 02 98 10 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e8 f8 43",
+        );
+        let a = Variant::SupeRun.decode_status(&a).unwrap();
+        let b = Variant::SupeRun.decode_status(&b).unwrap();
+        assert_eq!(a.belt_state(), BeltState::Running);
+        assert!(!a.imperial(), "units already normalised");
+        assert_eq!((a.steps, b.steps), (Some(213), Some(232)));
+        // metres, despite the imperial flag: +10 m in 16 s at 2.3 km/h
+        assert_eq!((a.distance_m, b.distance_m), (100, 110));
+        assert!(
+            (a.speed_mps * 3.6 - 2.31).abs() < 0.01,
+            "{}",
+            a.speed_mps * 3.6
+        );
+        assert!((a.target_speed_kmh - 2.31).abs() < 0.01);
+        assert_eq!(a.kcal, 8);
+        // the same bytes are not a valid classic packet's speed/distance
+        assert!(Variant::SupeRun.decode_status(&hex("68 2f 00")).is_none());
+    }
+
+    #[test]
+    fn superun_status_roundtrip() {
+        let raw = encode_superun_status(1, BeltState::Running, 4.0, 4.0, 420, 600, 12, 60.0);
+        assert_eq!(&raw[..4], &[0x4d, 0x04, 0x01, 0x2f]);
+        assert_eq!(raw.len(), 51);
+        let s = decode_superun_status(&raw).unwrap();
+        assert!((s.speed_mps * 3.6 - 4.0).abs() < 0.01);
+        assert_eq!((s.distance_m, s.steps, s.kcal), (420, Some(600), 12));
+        assert!(decode_superun_status(&raw[4..]).is_none(), "unframed");
+        // every speed on the 0.1 km/h grid reads back exactly (§3.6)
+        for tenths in 10..=60 {
+            let v = tenths as f64 / 10.0;
+            let raw = encode_superun_status(1, BeltState::Running, v, v, 0, 0, 0, 0.0);
+            let s = decode_superun_status(&raw).unwrap();
+            assert!((s.target_speed_kmh - v).abs() < 1e-9, "{v}");
+            assert!((s.speed_mps * 3.6 - v).abs() < 1e-9, "{v}");
+        }
+        assert!(decode_superun_status(&raw[..14]).is_none(), "short");
     }
 
     #[test]

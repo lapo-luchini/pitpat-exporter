@@ -24,7 +24,8 @@ pub struct Config {
     #[arg(long, env = "PITPAT_ADAPTER")]
     pub adapter: Option<String>,
 
-    /// Treadmill MAC address; default = scan for the fba0 advertising UUID.
+    /// Treadmill MAC address; default = scan for the fba0 advertising UUID
+    /// or a "PitPat…" name (SupeRun models advertise no service, §4.1).
     #[arg(long, env = "PITPAT_ADDRESS")]
     pub address: Option<String>,
 

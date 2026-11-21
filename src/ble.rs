@@ -3,7 +3,7 @@
 //! Real treadmill over BlueZ (bluer's bluetoothd D-Bus API), §4.1.
 
 use crate::link::LinkError;
-use crate::protocol::{NOTIFY_UUID, SERVICE_UUID, WRITE_UUID};
+use crate::protocol::{SERVICE_UUID, SUPERUN_SERVICE_UUID, Variant};
 use bluer::gatt::WriteOp;
 use bluer::gatt::remote::{Characteristic, CharacteristicWriteRequest};
 use bluer::{
@@ -17,7 +17,9 @@ use std::pin::Pin;
 use std::time::Duration;
 
 /// Look up the treadmill: pinned address if set, otherwise scan for the
-/// PitPat advertising service and take the first match. No pairing.
+/// PitPat advertising service (or a "PitPat…" name: SupeRun-built models
+/// advertise none) and take the first match. No pairing. The protocol
+/// family is picked from the GATT services after connecting (§3.7).
 pub struct BleLink {
     pub adapter_name: Option<String>,
     pub address: Option<String>,
@@ -70,18 +72,25 @@ impl BleLink {
         let dev_addr = device.address().to_string();
         tracing::info!(device = %dev_addr, "BLE connected");
         let chars = find_characteristics(&device).await?;
+        // §3.7: like the reference app, a SupeRun write characteristic
+        // without `write` gets Write Commands straight away
+        let write_command = chars.variant == Variant::SupeRun
+            && !chars.write.flags().await.map(|f| f.write).unwrap_or(true);
         let notify = chars.notify.notify().await.map_err(perr)?;
-        tracing::debug!("notifications subscribed");
+        tracing::info!(variant = chars.variant.as_str(), "notifications subscribed");
         Ok(BleConn {
             address: dev_addr,
+            variant: chars.variant,
             device,
             write_char: chars.write,
+            write_command,
             notify: Box::pin(notify),
         })
     }
 }
 
 struct FoundChar {
+    variant: Variant,
     write: Characteristic,
     notify: Characteristic,
 }
@@ -277,24 +286,44 @@ async fn discover_pinned(adapter: &Adapter, addr: &str) -> Result<Device, LinkEr
     result
 }
 
-/// Auto-discovery: scan with the fba0 service UUID filter and take the
-/// first match; same 10 s cap and explicit stop as the pinned fallback.
+/// Is this one of ours? The fba0 model advertises its service; the
+/// SupeRun-built ones (PitPat-T01) advertise none, only their name.
+async fn is_treadmill(dev: &Device) -> bool {
+    let uuids = dev.uuids().await.unwrap_or_default().unwrap_or_default();
+    if uuids.contains(&SERVICE_UUID) || uuids.contains(&SUPERUN_SERVICE_UUID) {
+        return true;
+    }
+    let name = dev.name().await.unwrap_or_default().unwrap_or_default();
+    name.starts_with("PitPat") || name.starts_with("PITPAT")
+}
+
+/// Auto-discovery: scan LE devices and take the first treadmill; same
+/// 10 s cap and explicit stop as the pinned fallback. No UUID filter, as
+/// SupeRun models don't advertise one: devices whose name arrives later
+/// (scan response) are re-checked every second.
 async fn scan_and_connect(adapter: &Adapter) -> Result<Device, LinkError> {
     let filter = DiscoveryFilter {
         transport: DiscoveryTransport::Le,
-        uuids: HashSet::from([SERVICE_UUID]),
         ..Default::default()
     };
     adapter.set_discovery_filter(filter).await.map_err(perr)?;
     let events = discovery_events(adapter).await?;
     pin_mut!(events);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(DISCOVERY_S);
-    let result = loop {
+    let mut unnamed: HashSet<Address> = HashSet::new();
+    let result = 'scan: loop {
         let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(1), events.next()).await
         else {
             if tokio::time::Instant::now() >= deadline {
                 tracing::warn!(secs = DISCOVERY_S, "no PitPat advertisement seen in time");
                 break Err(LinkError::NotFound);
+            }
+            for addr in &unnamed {
+                if let Ok(dev) = adapter.device(*addr) {
+                    if is_treadmill(&dev).await {
+                        break 'scan Ok(dev);
+                    }
+                }
             }
             continue;
         };
@@ -302,9 +331,11 @@ async fn scan_and_connect(adapter: &Adapter) -> Result<Device, LinkError> {
             let Ok(dev) = adapter.device(addr) else {
                 continue;
             };
-            let uuids = dev.uuids().await.unwrap_or_default().unwrap_or_default();
-            if uuids.contains(&SERVICE_UUID) {
+            if is_treadmill(&dev).await {
                 break Ok(dev);
+            }
+            if dev.name().await.ok().flatten().is_none() {
+                unnamed.insert(addr);
             }
         }
     };
@@ -331,26 +362,37 @@ async fn connect_with_retries(device: &Device) -> bluer::Result<()> {
     }
 }
 
+/// The command/status characteristics, and from which service the
+/// protocol family: fba0 (PitPat) wins over ffff (SupeRun) if a firmware
+/// ever offered both.
 async fn find_characteristics(device: &Device) -> Result<FoundChar, LinkError> {
-    for service in device.services().await.map_err(perr)? {
-        if service.uuid().await.map_err(perr)? != SERVICE_UUID {
-            continue;
-        }
-        let mut write = None;
-        let mut notify = None;
-        for char in service.characteristics().await.map_err(perr)? {
-            match char.uuid().await.map_err(perr)? {
-                u if u == WRITE_UUID => write = Some(char),
-                u if u == NOTIFY_UUID => notify = Some(char),
-                _ => {}
+    let services = device.services().await.map_err(perr)?;
+    for variant in [Variant::PitPat, Variant::SupeRun] {
+        let (service_uuid, write_uuid, notify_uuid) = variant.uuids();
+        for service in &services {
+            if service.uuid().await.map_err(perr)? != service_uuid {
+                continue;
             }
-        }
-        if let (Some(write), Some(notify)) = (write, notify) {
-            return Ok(FoundChar { write, notify });
+            let mut write = None;
+            let mut notify = None;
+            for char in service.characteristics().await.map_err(perr)? {
+                match char.uuid().await.map_err(perr)? {
+                    u if u == write_uuid => write = Some(char),
+                    u if u == notify_uuid => notify = Some(char),
+                    _ => {}
+                }
+            }
+            if let (Some(write), Some(notify)) = (write, notify) {
+                return Ok(FoundChar {
+                    variant,
+                    write,
+                    notify,
+                });
+            }
         }
     }
     Err(LinkError::Dead(
-        "fba0/fba1/fba2 characteristics not found".into(),
+        "neither fba0/fba1/fba2 nor ffff/ff01/ff02 characteristics found".into(),
     ))
 }
 
@@ -363,11 +405,15 @@ fn perr(err: bluer::Error) -> LinkError {
 /// A live BLE connection: notification stream + command writes.
 pub struct BleConn {
     pub address: String,
+    /// Protocol family, from the GATT services found (§3.7).
+    pub variant: Variant,
     /// Kept so the LE link can be dropped explicitly: BlueZ keeps the
     /// connection alive after the notify stream dies, which would block
     /// the treadmill's own phone app (REVIEW item 6).
     device: Device,
     write_char: Characteristic,
+    /// SupeRun characteristic without `write`: Write Commands only.
+    write_command: bool,
     notify: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
 }
 
@@ -379,7 +425,8 @@ impl BleConn {
         }
     }
 
-    /// Next notification's raw bytes; `Err` ⇒ the link is dead.
+    /// Next notification's raw bytes; `Err` ⇒ the link is dead. Cancel-safe
+    /// (`StreamExt::next`), as `Notify` requires.
     pub async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
         self.notify
             .next()
@@ -394,6 +441,13 @@ impl BleConn {
     /// `Command`. Write Commands are kept only as a fallback for a
     /// firmware that rejects requests.
     pub async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
+        if self.write_command {
+            let command = CharacteristicWriteRequest {
+                op_type: WriteOp::Command,
+                ..Default::default()
+            };
+            return self.write_char.write_ext(pkt, &command).await.map_err(perr);
+        }
         let request = CharacteristicWriteRequest {
             op_type: WriteOp::Request,
             ..Default::default()

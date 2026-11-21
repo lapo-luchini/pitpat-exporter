@@ -289,8 +289,9 @@ stop          (seq 6)  4d 00 06 17 6a 17 00 00 00 00 00 00 05 00 58 00 08 00 00 
 ### 4.1 Connection
 - Adapter: config `adapter` (default: BlueZ default adapter).
 - Device: if config `address` is set, connect to it directly (discovering if not yet known to
-  BlueZ); otherwise scan for devices advertising service `fba0` and use the first one found. Log
-  the address so the user can pin it.
+  BlueZ); otherwise scan for devices advertising service `fba0` (or `ffff`), or named
+  `PitPat…`/`PITPAT…` (SupeRun models advertise no service, §3.7), and use the first one found.
+  Log the address so the user can pin it. The protocol variant comes from the GATT services.
 - No pairing/bonding is required (the web version doesn't pair).
 - On disconnect or any BLE error: state becomes `disconnected`, end the open session (§4.3), and
   reconnect with exponential backoff 1 s → 2 s → … capped at 30 s, forever. Count reconnects in

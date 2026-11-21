@@ -163,8 +163,9 @@ To release a new version:
    with a detached HEAD sitting on trunk's tip (how a jj-colocated repo
    leaves git after `jj new trunk`): the release commit is made and
    trunk is moved to it after the tag succeeds; the next `jj` command
-   imports both. If `cargo`/`jq` are not on PATH (typical NixOS), the
-   script re-runs itself inside `nix develop` automatically;
+   imports both. If anything the build needs is not on PATH — `cargo`,
+   `jq`, `pkg-config`, or the `dbus-1` library `pkg-config` must find —
+   the script re-runs itself inside `nix develop` automatically;
 3. check the commit and the tag, then `git push --follow-tags origin trunk`.
 
 Two guards keep the tags and the version in step: `cargo test`'s

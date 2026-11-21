@@ -28,16 +28,23 @@ new="$1"
 
 cd "$(dirname "$0")/.."
 
-# R7: on NixOS, cargo and jq usually live only in the nix dev shell. If
-# any tool is missing, re-exec inside `nix develop` (guard variable so
-# this cannot loop; --extra-experimental-features is harmless when
-# flakes are already on). The check is on missing tools, not on NixOS,
-# so it helps on any machine with nix and does nothing where the tools
-# are installed.
+# R7/V1: on NixOS, cargo and jq usually live only in the nix dev shell.
+# "Missing" means everything the build needs: the script's tools (cargo,
+# jq, pkg-config) AND the library that libdbus-sys requires
+# (`pkg-config --exists 'dbus-1 >= 1.6'`, only asked when pkg-config is
+# present). If anything is missing, re-exec inside `nix develop` (guard
+# variable so this cannot loop; --extra-experimental-features is
+# harmless when flakes are already on). The check is on what's missing,
+# not on NixOS, so it helps on any machine with nix and does nothing
+# where the tools and the -dev libraries are installed.
 missing=""
-for tool in cargo jq; do
+for tool in cargo jq pkg-config; do
     command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
+if command -v pkg-config >/dev/null 2>&1 \
+    && ! pkg-config --exists 'dbus-1 >= 1.6'; then
+    missing="$missing dbus-1 (pkg-config)"
+fi
 if [ -n "$missing" ]; then
     if [ "${PITPAT_RELEASE_NIX:-}" = 1 ]; then
         echo "refusing: even inside the nix dev shell these tools are" \
@@ -46,7 +53,8 @@ if [ -n "$missing" ]; then
     fi
     if ! command -v nix >/dev/null 2>&1; then
         echo "refusing: missing tools:$missing and no nix on PATH to get" \
-            "them (install cargo and jq, or run from a nix dev shell)" >&2
+            "them (install cargo, jq and pkg-config, or run from a nix" \
+            "dev shell with dbus)" >&2
         exit 1
     fi
     self="$(readlink -f "$0")"

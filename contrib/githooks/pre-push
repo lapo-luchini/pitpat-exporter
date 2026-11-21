@@ -12,9 +12,15 @@
 #
 # (contrib/release.sh tags correctly by construction; this catches
 # hand-made tags like `git tag 1.4.1` on an unbumped trunk.)
+#
+# S3: only plain X.Y.Z tags are checked — other names (v1.4.2, 1.5.0-rc1,
+# annotation-only notes) are not release tags. Tags up to LEGACY_LAST_TAG
+# predate contrib/release.sh and were cut by hand, so their commits may
+# legitimately disagree with Cargo.toml; the rule starts with 1.4.0.
 set -euo pipefail
 
 zero=0000000000000000000000000000000000000000
+readonly LEGACY_LAST_TAG="1.3.0"
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     case "$local_ref" in
@@ -24,6 +30,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # a tag deletion reads as the null sha: nothing to check
     [ "$local_sha" = "$zero" ] && continue
     tag="${local_ref#refs/tags/}"
+    [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    # numeric compare, so 1.10.0 is never treated as legacy (a plain
+    # sort would say otherwise)
+    if [ "$tag" = "$(printf '%s\n%s\n' "$LEGACY_LAST_TAG" "$tag" \
+        | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" ]; then
+        continue
+    fi
     version="$(git show "$local_sha":Cargo.toml \
         | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1)"
     if [ "$version" != "$tag" ]; then

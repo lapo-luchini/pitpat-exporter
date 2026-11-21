@@ -176,7 +176,10 @@ hex bytes after `bytes=`, in file order, with the line timestamps —
 check that every frame decodes and matches the `state=` text the old
 daemon logged, and feed the two 2026-11-17 walks to the core to assert
 one session per walk and the final step counts (268 and 446, the
-regression check for the old `steps=0` bug). The captures are embedded
+regression check for the old `steps=0` bug), and feed the device-b
+PitPat-T01 walk with no SupeRun link set up (frames decode from their
+headers) to assert one open session and the belt's step count over 20
+counted steps (213 → 232). The captures are embedded
 with `include_str!`, so both `cargo test` and the nix build see them.
 
 ### 3.3 Command packet (host → treadmill), 23 bytes

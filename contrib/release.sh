@@ -58,6 +58,8 @@ rollback() {
     echo
     echo "release failed (line $1): the tree is restored, nothing was" \
         "committed or tagged; fix the problem and run the script again" >&2
+    # S6: the jq temp file is untracked, so checkout does not remove it
+    rm -f metadata.json.new
     git reset -q HEAD -- $files
     git checkout -q -- $files
 }

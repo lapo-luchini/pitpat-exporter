@@ -7,7 +7,7 @@ rust-version = "1.85"
 license = "ISC"
 authors = ["Lapo Luchini <lapo@lapo.it>"]
 repository = "https://github.com/lapo-luchini/pitpat-exporter"
-homepage = "https://github.com/lapo-luchini/pitpat-exporter/issues"
+homepage = "https://github.com/lapo-luchini/pitpat-exporter"
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "signal", "fs"] }

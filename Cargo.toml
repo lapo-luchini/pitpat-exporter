@@ -1,7 +1,7 @@
 [package]
 name = "pitpat"
 description = "PitPat walking-pad treadmill BLE controller and Prometheus exporter"
-version = "1.4.1"
+version = "1.5.0"
 edition = "2024"
 rust-version = "1.85"
 license = "ISC"

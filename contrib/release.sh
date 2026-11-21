@@ -72,9 +72,12 @@ else
         detached=1
         old_commit="$head_commit"
     else
-        echo "refusing: releases are cut from trunk (HEAD is on" \
-            "$([ -n "$branch" ] && echo "branch '$branch'" || echo "detached $head_commit"))" \
-            "; attach with 'git switch trunk', with jj: 'jj new trunk'" >&2
+        # U3: one echo argument, so no stray space before the ';'; short
+        # hash in the message
+        where="detached $(git rev-parse --short HEAD 2>/dev/null || true)"
+        [ -n "$branch" ] && where="branch '$branch'"
+        echo "refusing: releases are cut from trunk (HEAD is on $where);" \
+            "attach with 'git switch trunk', with jj: 'jj new trunk'" >&2
         exit 1
     fi
 fi
@@ -94,6 +97,18 @@ if ! [[ "$new" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || [ "$(printf '%s\n%s\n' "$new" "$cur" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" != "$cur" ] \
     || [ "$new" = "$cur" ]; then
     echo "refusing: $new is not newer than the current version $cur" >&2
+    exit 1
+fi
+
+# U2: refuse an already-released HEAD up front, before any change —
+# these only surfaced after the bump and a full cargo test
+if git rev-parse -q --verify "refs/tags/$new" >/dev/null 2>&1; then
+    echo "refusing: tag $new already exists" >&2
+    exit 1
+fi
+head_tag="$(git tag --points-at HEAD | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+if [ -n "$head_tag" ]; then
+    echo "refusing: HEAD is already released as $head_tag; commit something first" >&2
     exit 1
 fi
 

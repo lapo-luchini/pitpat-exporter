@@ -592,11 +592,13 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   `meta.mainProgram = "pitpat"`.
 - `packages.<sys>.plasmoid`: installs the plasmoid to
   `$out/share/plasma/plasmoids/it.lapo.pitpat`.
-- **Version** (R3): `Cargo.toml` holds the last release; build.rs turns a
-  checkout's `git describe --tags --dirty` into `PITPAT_VERSION` (an env var
-  wins, no git falls back to the release version), while the flake hands
-  `"<version>-g<hash>"` (and `-dirty`) to both packages since a store copy has
-  no `.git`; `nix/plasmoid.nix` rewrites the installed plasmoid's
+- **Version** (R3/S2): `Cargo.toml` holds the last release; build.rs turns a
+  checkout's `git describe --tags` into `PITPAT_VERSION` (an env var
+  wins, no git falls back to the release version; the build re-runs on
+  `.git/HEAD`, the ref it points to, `.git/refs/tags` and
+  `.git/packed-refs`, so a new tag updates the version too), while the flake
+  hands `"<version>-g<hash>"` (`-dirty` on a dirty tree) to both packages since
+  a store copy has no `.git`; `nix/plasmoid.nix` rewrites the installed plasmoid's
   `metadata.json` version with `jq`. The committed `metadata.json` keeps the
   plain release version, checked against `Cargo.toml` by a `cargo test`.
 - `packages.<sys>.default` = `pitpat`.

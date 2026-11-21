@@ -49,6 +49,20 @@ if ! [[ "$new" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     exit 1
 fi
 
+# Failing steps (e.g. `cargo test`) must not leave the tree with a
+# half-applied bump: the next run would refuse it as dirty. The three
+# files are tracked and the tree was verified clean, so restoring them
+# from HEAD is a full rollback of the bump phase.
+files="Cargo.toml Cargo.lock plasmoid/it.lapo.pitpat/metadata.json"
+rollback() {
+    echo
+    echo "release failed (line $1): the tree is restored, nothing was" \
+        "committed or tagged; fix the problem and run the script again" >&2
+    git reset -q HEAD -- $files
+    git checkout -q -- $files
+}
+trap 'rollback $LINENO' ERR
+
 sed -i "0,/^version = \"$cur\"$/s//version = \"$new\"/" Cargo.toml
 cargo update -p pitpat --offline >/dev/null
 jq --arg v "$new" '.KPlugin.Version = $v' \
@@ -57,10 +71,25 @@ mv metadata.json.new plasmoid/it.lapo.pitpat/metadata.json
 
 echo "version: $cur -> $new, running cargo test"
 cargo test
+trap - ERR
 
-git add Cargo.toml Cargo.lock plasmoid/it.lapo.pitpat/metadata.json
-git commit -m "release $new"
-git tag -s "$new" -m "Version $new"
+git add $files
+git commit -m "release $new" || {
+    git reset -q HEAD -- $files
+    git checkout -q -- $files
+    echo "release failed: could not commit; the tree is restored" >&2
+    exit 1
+}
+if ! git tag -s "$new" -m "Version $new"; then
+    # the commit exists: drop it again (its content is exactly HEAD^ plus
+    # the bump, and the bump is reverted with the commit). Signed tags
+    # make this the likely failure point: a cancelled pinentry must not
+    # leave the release commit behind
+    git reset -q --hard HEAD~1
+    echo "release failed: could not create signed tag $new; the release" \
+        "commit was undone and the tree is restored" >&2
+    exit 1
+fi
 
 echo
 echo "released $new: review the commit and the tag, then push them:"

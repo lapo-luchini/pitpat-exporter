@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 
 use crate::link::LinkError;
-use crate::protocol::{BeltState, Command};
+use crate::protocol::{BeltState, Command, Variant};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -12,10 +12,12 @@ use tokio::time::Instant;
 /// real treadmill (start → 3 s starting → running ramping at 0.5 km/h/s;
 /// counters advance from the speed; stop resets counters), and can be
 /// told to drop the link (daemon wires SIGUSR1 into `request_drop`) to
-/// exercise the reconnect logic.
+/// exercise the reconnect logic. With `Variant::SupeRun` it speaks the
+/// SupeRun framing and units instead (§3.7, `--simulate-model superun`).
 #[derive(Clone)]
 pub struct SimLink {
     weight_kg: u8,
+    variant: Variant,
     drop: Arc<AtomicBool>,
     /// Shared across connects: the treadmill persists between BLE
     /// sessions (§4.5a tests need a belt started by the "remote" while
@@ -26,10 +28,16 @@ pub struct SimLink {
 pub struct SimConn {
     /// The simulated treadmill's fixed address (§6.2 device view).
     pub address: String,
+    pub variant: Variant,
     belt: Arc<std::sync::Mutex<SimBelt>>,
     weight_kg: u8,
     drop: Arc<AtomicBool>,
     last_tick: Option<Instant>,
+    /// When the pending notification is due: kept across a dropped
+    /// `recv_notification` call so it stays cancel-safe (§3.7).
+    next_at: Option<Instant>,
+    /// SupeRun: the treadmill's own frame sequence number.
+    seq: u8,
 }
 
 struct SimBelt {
@@ -55,9 +63,15 @@ struct SimBelt {
 }
 
 impl SimLink {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(weight_kg: u8) -> Self {
+        Self::with_variant(weight_kg, Variant::PitPat)
+    }
+
+    pub fn with_variant(weight_kg: u8, variant: Variant) -> Self {
         Self {
             weight_kg,
+            variant,
             drop: Arc::new(AtomicBool::new(false)),
             belt: Arc::new(std::sync::Mutex::new(SimBelt::new())),
         }
@@ -111,10 +125,13 @@ impl SimLink {
         self.drop.store(false, Ordering::Relaxed);
         Ok(SimConn {
             address: "00:11:22:33:44:55".to_string(),
+            variant: self.variant,
             belt: self.belt.clone(),
             weight_kg: self.weight_kg,
             drop: self.drop.clone(),
             last_tick: None,
+            next_at: None,
+            seq: 0,
         })
     }
 }
@@ -251,6 +268,22 @@ fn parse_command(pkt: &[u8]) -> Option<(Command, f64)> {
     Some((cmd, speed))
 }
 
+/// Parse an unframed SupeRun command packet (§3.7) the same way.
+fn parse_superun_command(pkt: &[u8]) -> Option<(Command, f64)> {
+    if pkt.len() != 23 || pkt[0] != 0x6a || pkt[22] != 0x43 {
+        return None;
+    }
+    let speed = u16::from_be_bytes([pkt[6], pkt[7]]) as f64 / 1600.0 * 1.609344;
+    let cmd = match pkt[12] {
+        0x0c if pkt[8] == 0x01 => Command::SetSpeed,
+        0x0c => Command::Start,
+        0x0a => Command::Pause,
+        0x08 => Command::Stop,
+        _ => return None,
+    };
+    Some((cmd, speed))
+}
+
 pub const NOTIFY_PERIOD: Duration = Duration::from_millis(500);
 
 impl SimConn {
@@ -259,7 +292,12 @@ impl SimConn {
     pub async fn disconnect(&mut self) {}
 
     pub async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError> {
-        tokio::time::sleep(NOTIFY_PERIOD).await;
+        // cancel-safe (§3.7): a dropped call keeps its deadline
+        let at = *self
+            .next_at
+            .get_or_insert_with(|| Instant::now() + NOTIFY_PERIOD);
+        tokio::time::sleep_until(at).await;
+        self.next_at = None;
         if self.drop.load(Ordering::Relaxed) {
             return Err(LinkError::Dead("simulated link dropped (SIGUSR1)".into()));
         }
@@ -290,28 +328,39 @@ impl SimConn {
             }
             belt.tick(dt, self.weight_kg)
         };
-        let speed = {
+        let (speed, target) = {
             let belt = self.belt.lock().expect("sim belt");
-            belt.speed
+            (belt.speed, belt.target)
         };
-        Ok(crate::protocol::encode_status(
-            state,
-            false,
-            speed,
-            self.belt.lock().expect("sim belt").target,
-            dist,
-            steps,
-            kcal,
-            dur,
-        )
-        .to_vec())
+        Ok(match self.variant {
+            Variant::PitPat => {
+                crate::protocol::encode_status(state, false, speed, target, dist, steps, kcal, dur)
+                    .to_vec()
+            }
+            Variant::SupeRun => {
+                self.seq = self.seq.wrapping_add(1);
+                crate::protocol::encode_superun_status(
+                    self.seq, state, speed, target, dist, steps, kcal, dur,
+                )
+            }
+        })
     }
 
     pub async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError> {
+        let (pkt, parsed) = match self.variant {
+            Variant::PitPat => (pkt, parse_command(pkt)),
+            Variant::SupeRun => {
+                // an unframed packet is ignored, like the hardware would
+                let Some(inner) = crate::protocol::superun_unframe(pkt) else {
+                    return Ok(());
+                };
+                (inner, parse_superun_command(inner))
+            }
+        };
         if pkt.len() == 5 {
             return Ok(()); // heartbeat: nothing to apply
         }
-        if let Some((cmd, speed)) = parse_command(pkt) {
+        if let Some((cmd, speed)) = parsed {
             let mut belt = self.belt.lock().expect("sim belt");
             belt.commanded_speed = speed;
             belt.pending = Some(cmd);
@@ -512,5 +561,63 @@ mod tests {
                 .unwrap(),
             Err(LinkError::Dead(_))
         ));
+    }
+
+    /// §3.7: the SupeRun simulator only takes framed packets, answers
+    /// with framed `68 2f` frames in mph × 1600, and a framed SetSpeed
+    /// after the start ramp applies.
+    #[tokio::test(start_paused = true)]
+    async fn superun_framed_start_and_speed() {
+        use crate::protocol::{HEARTBEAT, Variant::SupeRun};
+        let link = SimLink::with_variant(80, SupeRun);
+        let mut c = link.connect().await.unwrap();
+        let first = c.recv_notification().await.unwrap();
+        assert_eq!((first[0], first[4], first[5]), (0x4d, 0x68, 0x2f));
+        let cmd = |seq, c, kmh| SupeRun.frame(seq, &SupeRun.encode_command(c, kmh, 80, 1));
+        // an unframed start is ignored
+        c.write_packet(&crate::protocol::encode_command(Command::Start, 3.0, 80, 1))
+            .await
+            .unwrap();
+        c.write_packet(&SupeRun.frame(0, &HEARTBEAT)).await.unwrap();
+        let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap());
+        assert_eq!(st.unwrap().belt_state(), BeltState::Stopped);
+        c.write_packet(&cmd(1, Command::Start, 3.0)).await.unwrap();
+        let mut running = false;
+        for _ in 0..20 {
+            let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap());
+            if st.unwrap().belt_state() == BeltState::Running {
+                running = true;
+                break;
+            }
+        }
+        assert!(running, "sim never reached running");
+        c.write_packet(&cmd(2, Command::SetSpeed, 3.0))
+            .await
+            .unwrap();
+        for _ in 0..60 {
+            let st = crate::protocol::decode_status(&c.recv_notification().await.unwrap()).unwrap();
+            if (st.speed_mps * 3.6 - 3.0).abs() < 0.01 {
+                assert!((st.target_speed_kmh - 3.0).abs() < 0.01);
+                return;
+            }
+        }
+        panic!("SetSpeed never applied");
+    }
+
+    /// §3.7: a dropped recv_notification keeps its deadline, so a
+    /// 200 ms keep-alive tick can never starve the 500 ms notifications.
+    #[tokio::test(start_paused = true)]
+    async fn recv_notification_is_cancel_safe() {
+        let link = SimLink::new(80);
+        let mut c = link.connect().await.unwrap();
+        let t0 = Instant::now();
+        for _ in 0..5 {
+            let r = tokio::time::timeout(Duration::from_millis(200), c.recv_notification()).await;
+            if r.is_ok() {
+                break;
+            }
+        }
+        // 3 × 200 ms passes the 500 ms deadline: the packet arrived on time
+        assert!(Instant::now().duration_since(t0) <= Duration::from_millis(600));
     }
 }

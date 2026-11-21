@@ -1,0 +1,194 @@
+# PitPat-T01 (SupeRun-built, service ffff) walking, 2026-11-18 local time (Europe/Rome).
+# Not a daemon log: recorded in the browser with the PitPat Walk web app ("Record packets", Web
+# Bluetooth), which keeps the raw bytes of every notification and write with a millisecond
+# timestamp. Converted line by line to this format: the time is cut to the second, "notify" is a
+# status notification, "write" a packet the page sent. The bytes are unchanged and include the
+# 4d framing (4d 04 from the treadmill, 4d 00 from the host). Web Bluetooth does not expose the
+# BLE address, so none is in the file; the 68 2f frame carries no serial.
+# The belt was already running when the recording began and runs for the whole file. The page
+# only wrote the framed keep-alive (4d 00 <seq> 05 6a 05 fd f8 43) every 200 ms: no start,
+# SetSpeed, pause or stop in it.
+# Three recordings back to back (the page saves one file per recording):
+#   09:50:49-09:50:57 first recording (63 lines)
+#   09:50:58-09:50:58 second recording (3 lines)
+#   09:51:01-09:51:16 third recording (108 lines), ~3 s after the second
+# Owner notes: 20 steps counted during the third recording, starting just after a step.
+# Seen in the frames: the belt's step count (u16 @43) goes from 213 to 232 over the third
+# recording; distance (@7) is metres despite the imperial flag (100 -> 110 m in those 15 s);
+# speed and target (@3, @5) stay at 08 fc = 2300. Every notification is a 51-byte
+# 4d 04 <seq> 2f frame around a 47-byte 68 2f packet; no other frame type appears (but the
+# trace starts mid-walk, not at connect).
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d1 2f 68 2f 00 08 fc 08 fc 00 00 00 5d 00 00 00 00 00 00 00 00 07 00 02 2a b0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 96 00 c3 0c 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG write bytes=4d 00 23 05 6a 05 fd f8 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG write bytes=4d 00 24 05 6a 05 fd f8 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG write bytes=4d 00 25 05 6a 05 fd f8 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d2 2f 68 2f 00 08 fc 08 fc 00 00 00 5d 00 00 00 00 00 00 00 00 07 00 02 2a b0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c4 fb 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG write bytes=4d 00 26 05 6a 05 fd f8 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG write bytes=4d 00 27 05 6a 05 fd f8 43
+Nov 18 09:50:49 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d3 2f 68 2f 00 08 fc 08 fc 00 00 00 5d 00 00 00 00 00 00 00 00 07 00 02 2e 98 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c4 d7 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG write bytes=4d 00 28 05 6a 05 fd f8 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG write bytes=4d 00 29 05 6a 05 fd f8 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG write bytes=4d 00 2a 05 6a 05 fd f8 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d4 2f 68 2f 00 08 fc 08 fc 00 00 00 5d 00 00 00 00 00 00 00 00 07 00 02 2e 98 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c6 d5 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG write bytes=4d 00 2b 05 6a 05 fd f8 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG write bytes=4d 00 2c 05 6a 05 fd f8 43
+Nov 18 09:50:50 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d5 2f 68 2f 00 08 fc 08 fc 00 00 00 5e 00 00 00 00 00 00 00 00 08 00 02 32 80 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c6 dd 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG write bytes=4d 00 2d 05 6a 05 fd f8 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG write bytes=4d 00 2e 05 6a 05 fd f8 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG write bytes=4d 00 2f 05 6a 05 fd f8 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d6 2f 68 2f 00 08 fc 08 fc 00 00 00 5e 00 00 00 00 00 00 00 00 08 00 02 32 80 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c7 dc 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG write bytes=4d 00 30 05 6a 05 fd f8 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG write bytes=4d 00 31 05 6a 05 fd f8 43
+Nov 18 09:50:51 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d7 2f 68 2f 00 08 fc 08 fc 00 00 00 5e 00 00 00 00 00 00 00 00 08 00 02 36 68 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c7 30 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG write bytes=4d 00 32 05 6a 05 fd f8 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG write bytes=4d 00 33 05 6a 05 fd f8 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG write bytes=4d 00 34 05 6a 05 fd f8 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d8 2f 68 2f 00 08 fc 08 fc 00 00 00 5e 00 00 00 00 00 00 00 00 08 00 02 36 68 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 96 00 c8 cf 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG write bytes=4d 00 35 05 6a 05 fd f8 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG write bytes=4d 00 36 05 6a 05 fd f8 43
+Nov 18 09:50:52 host pitpat-walk[web]: DEBUG notify bytes=4d 04 d9 2f 68 2f 00 08 fc 08 fc 00 00 00 5f 00 00 00 00 00 00 00 00 08 00 02 3a 50 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 c9 0b 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG write bytes=4d 00 37 05 6a 05 fd f8 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG write bytes=4d 00 38 05 6a 05 fd f8 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG write bytes=4d 00 39 05 6a 05 fd f8 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG notify bytes=4d 04 da 2f 68 2f 00 08 fc 08 fc 00 00 00 5f 00 00 00 00 00 00 00 00 08 00 02 3a 50 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 ca 08 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG write bytes=4d 00 3a 05 6a 05 fd f8 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG write bytes=4d 00 3b 05 6a 05 fd f8 43
+Nov 18 09:50:53 host pitpat-walk[web]: DEBUG notify bytes=4d 04 db 2f 68 2f 00 08 fc 08 fc 00 00 00 60 00 00 00 00 00 00 00 00 08 00 02 3e 38 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 ca 5b 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG write bytes=4d 00 3c 05 6a 05 fd f8 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG write bytes=4d 00 3d 05 6a 05 fd f8 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG write bytes=4d 00 3e 05 6a 05 fd f8 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG notify bytes=4d 04 dc 2f 68 2f 00 08 fc 08 fc 00 00 00 60 00 00 00 00 00 00 00 00 08 00 02 3e 38 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 cb 5a 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG write bytes=4d 00 3f 05 6a 05 fd f8 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG write bytes=4d 00 40 05 6a 05 fd f8 43
+Nov 18 09:50:54 host pitpat-walk[web]: DEBUG notify bytes=4d 04 dd 2f 68 2f 00 08 fc 08 fc 00 00 00 60 00 00 00 00 00 00 00 00 08 00 02 42 20 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 66 00 cc 35 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG write bytes=4d 00 41 05 6a 05 fd f8 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG write bytes=4d 00 42 05 6a 05 fd f8 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG write bytes=4d 00 43 05 6a 05 fd f8 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG notify bytes=4d 04 de 2f 68 2f 00 08 fc 08 fc 00 00 00 60 00 00 00 00 00 00 00 00 08 00 02 42 20 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 66 00 cc 35 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG write bytes=4d 00 44 05 6a 05 fd f8 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG write bytes=4d 00 45 05 6a 05 fd f8 43
+Nov 18 09:50:55 host pitpat-walk[web]: DEBUG notify bytes=4d 04 df 2f 68 2f 00 08 fc 08 fc 00 00 00 61 00 00 00 00 00 00 00 00 08 00 02 46 08 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 96 00 cd e9 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG write bytes=4d 00 46 05 6a 05 fd f8 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG write bytes=4d 00 47 05 6a 05 fd f8 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG write bytes=4d 00 48 05 6a 05 fd f8 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG notify bytes=4d 04 e0 2f 68 2f 00 08 fc 08 fc 00 00 00 61 00 00 00 00 00 00 00 00 08 00 02 46 08 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 66 00 ce 1a 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG write bytes=4d 00 49 05 6a 05 fd f8 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG write bytes=4d 00 4a 05 6a 05 fd f8 43
+Nov 18 09:50:56 host pitpat-walk[web]: DEBUG notify bytes=4d 04 e1 2f 68 2f 00 08 fc 08 fc 00 00 00 62 00 00 00 00 00 00 00 00 08 00 02 49 f0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 66 00 ce ee 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG write bytes=4d 00 4b 05 6a 05 fd f8 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG write bytes=4d 00 4c 05 6a 05 fd f8 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG write bytes=4d 00 4d 05 6a 05 fd f8 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG notify bytes=4d 04 e2 2f 68 2f 00 08 fc 08 fc 00 00 00 62 00 00 00 00 00 00 00 00 08 00 02 49 f0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 96 00 cf 1f 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG write bytes=4d 00 4e 05 6a 05 fd f8 43
+Nov 18 09:50:57 host pitpat-walk[web]: DEBUG write bytes=4d 00 4f 05 6a 05 fd f8 43
+Nov 18 09:50:58 host pitpat-walk[web]: DEBUG write bytes=4d 00 51 05 6a 05 fd f8 43
+Nov 18 09:50:58 host pitpat-walk[web]: DEBUG write bytes=4d 00 52 05 6a 05 fd f8 43
+Nov 18 09:50:58 host pitpat-walk[web]: DEBUG notify bytes=4d 04 e4 2f 68 2f 00 08 fc 08 fc 00 00 00 62 00 00 00 00 00 00 00 00 08 00 02 4d d8 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 14 04 66 00 d1 dd 43
+Nov 18 09:51:01 host pitpat-walk[web]: DEBUG write bytes=4d 00 61 05 6a 05 fd f8 43
+Nov 18 09:51:01 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ea 2f 68 2f 00 08 fc 08 fc 00 00 00 64 00 00 00 00 00 00 00 00 08 00 02 59 90 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d5 8f 43
+Nov 18 09:51:01 host pitpat-walk[web]: DEBUG write bytes=4d 00 62 05 6a 05 fd f8 43
+Nov 18 09:51:01 host pitpat-walk[web]: DEBUG write bytes=4d 00 63 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG notify bytes=4d 04 eb 2f 68 2f 00 08 fc 08 fc 00 00 00 65 00 00 00 00 00 00 00 00 08 00 02 5d 78 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d5 62 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG write bytes=4d 00 64 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG write bytes=4d 00 65 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG write bytes=4d 00 66 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ec 2f 68 2f 00 08 fc 08 fc 00 00 00 65 00 00 00 00 00 00 00 00 08 00 02 5d 78 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d6 61 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG write bytes=4d 00 67 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG write bytes=4d 00 68 05 6a 05 fd f8 43
+Nov 18 09:51:02 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ed 2f 68 2f 00 08 fc 08 fc 00 00 00 65 00 00 00 00 00 00 00 00 08 00 02 61 60 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d6 45 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG write bytes=4d 00 69 05 6a 05 fd f8 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG write bytes=4d 00 6a 05 6a 05 fd f8 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG write bytes=4d 00 6b 05 6a 05 fd f8 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ee 2f 68 2f 00 08 fc 08 fc 00 00 00 65 00 00 00 00 00 00 00 00 08 00 02 61 60 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d8 4b 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG write bytes=4d 00 6c 05 6a 05 fd f8 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG write bytes=4d 00 6d 05 6a 05 fd f8 43
+Nov 18 09:51:03 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ef 2f 68 2f 00 08 fc 08 fc 00 00 00 66 00 00 00 00 00 00 00 00 08 00 02 65 48 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d8 64 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG write bytes=4d 00 6e 05 6a 05 fd f8 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG write bytes=4d 00 6f 05 6a 05 fd f8 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG write bytes=4d 00 70 05 6a 05 fd f8 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f0 2f 68 2f 00 08 fc 08 fc 00 00 00 66 00 00 00 00 00 00 00 00 08 00 02 65 48 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d8 64 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG write bytes=4d 00 71 05 6a 05 fd f8 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG write bytes=4d 00 72 05 6a 05 fd f8 43
+Nov 18 09:51:04 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f1 2f 68 2f 00 08 fc 08 fc 00 00 00 67 00 00 00 00 00 00 00 00 08 00 02 69 30 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 d9 10 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG write bytes=4d 00 73 05 6a 05 fd f8 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG write bytes=4d 00 74 05 6a 05 fd f8 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG write bytes=4d 00 75 05 6a 05 fd f8 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f2 2f 68 2f 00 08 fc 08 fc 00 00 00 67 00 00 00 00 00 00 00 00 08 00 02 69 30 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 da 13 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG write bytes=4d 00 76 05 6a 05 fd f8 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG write bytes=4d 00 77 05 6a 05 fd f8 43
+Nov 18 09:51:05 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f3 2f 68 2f 00 08 fc 08 fc 00 00 00 67 00 00 00 00 00 00 00 00 08 00 02 6d 18 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 96 00 da cf 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG write bytes=4d 00 78 05 6a 05 fd f8 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG write bytes=4d 00 79 05 6a 05 fd f8 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG write bytes=4d 00 7a 05 6a 05 fd f8 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f4 2f 68 2f 00 08 fc 08 fc 00 00 00 67 00 00 00 00 00 00 00 00 08 00 02 6d 18 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 db 3e 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG write bytes=4d 00 7b 05 6a 05 fd f8 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG write bytes=4d 00 7c 05 6a 05 fd f8 43
+Nov 18 09:51:06 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f5 2f 68 2f 00 08 fc 08 fc 00 00 00 68 00 00 00 00 00 00 00 00 08 00 02 71 00 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 dc 32 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG write bytes=4d 00 7d 05 6a 05 fd f8 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG write bytes=4d 00 7e 05 6a 05 fd f8 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG write bytes=4d 00 7f 05 6a 05 fd f8 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f6 2f 68 2f 00 08 fc 08 fc 00 00 00 68 00 00 00 00 00 00 00 00 08 00 02 71 00 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 96 00 dc c2 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG write bytes=4d 00 80 05 6a 05 fd f8 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG write bytes=4d 00 81 05 6a 05 fd f8 43
+Nov 18 09:51:07 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f7 2f 68 2f 00 08 fc 08 fc 00 00 00 69 00 00 00 00 00 00 00 00 09 00 02 74 e8 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 dd de 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG write bytes=4d 00 82 05 6a 05 fd f8 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG write bytes=4d 00 83 05 6a 05 fd f8 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG write bytes=4d 00 84 05 6a 05 fd f8 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f8 2f 68 2f 00 08 fc 08 fc 00 00 00 69 00 00 00 00 00 00 00 00 09 00 02 74 e8 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 de dd 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG write bytes=4d 00 85 05 6a 05 fd f8 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG write bytes=4d 00 86 05 6a 05 fd f8 43
+Nov 18 09:51:08 host pitpat-walk[web]: DEBUG notify bytes=4d 04 f9 2f 68 2f 00 08 fc 08 fc 00 00 00 69 00 00 00 00 00 00 00 00 09 00 02 78 d0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 96 00 de 19 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG write bytes=4d 00 87 05 6a 05 fd f8 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG write bytes=4d 00 88 05 6a 05 fd f8 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG write bytes=4d 00 89 05 6a 05 fd f8 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG notify bytes=4d 04 fa 2f 68 2f 00 08 fc 08 fc 00 00 00 69 00 00 00 00 00 00 00 00 09 00 02 78 d0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 df e6 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG write bytes=4d 00 8a 05 6a 05 fd f8 43
+Nov 18 09:51:09 host pitpat-walk[web]: DEBUG write bytes=4d 00 8b 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG notify bytes=4d 04 fb 2f 68 2f 00 08 fc 08 fc 00 00 00 6a 00 00 00 00 00 00 00 00 09 00 02 7c b8 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e0 b6 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG write bytes=4d 00 8c 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG write bytes=4d 00 8d 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG write bytes=4d 00 8e 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG notify bytes=4d 04 fc 2f 68 2f 00 08 fc 08 fc 00 00 00 6a 00 00 00 00 00 00 00 00 09 00 02 7c b8 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 96 00 e0 46 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG write bytes=4d 00 8f 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG write bytes=4d 00 90 05 6a 05 fd f8 43
+Nov 18 09:51:10 host pitpat-walk[web]: DEBUG notify bytes=4d 04 fd 2f 68 2f 00 08 fc 08 fc 00 00 00 6b 00 00 00 00 00 00 00 00 09 00 02 80 a0 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e1 52 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG write bytes=4d 00 91 05 6a 05 fd f8 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG write bytes=4d 00 92 05 6a 05 fd f8 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG write bytes=4d 00 93 05 6a 05 fd f8 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG notify bytes=4d 04 fe 2f 68 2f 00 08 fc 08 fc 00 00 00 6b 00 00 00 00 00 00 00 00 09 00 02 84 88 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e1 7e 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG write bytes=4d 00 94 05 6a 05 fd f8 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG write bytes=4d 00 95 05 6a 05 fd f8 43
+Nov 18 09:51:11 host pitpat-walk[web]: DEBUG notify bytes=4d 04 ff 2f 68 2f 00 08 fc 08 fc 00 00 00 6b 00 00 00 00 00 00 00 00 09 00 02 84 88 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e2 7d 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG write bytes=4d 00 96 05 6a 05 fd f8 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG write bytes=4d 00 97 05 6a 05 fd f8 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG write bytes=4d 00 98 05 6a 05 fd f8 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG notify bytes=4d 04 00 2f 68 2f 00 08 fc 08 fc 00 00 00 6c 00 00 00 00 00 00 00 00 09 00 02 88 70 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e3 8f 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG write bytes=4d 00 99 05 6a 05 fd f8 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG write bytes=4d 00 9a 05 6a 05 fd f8 43
+Nov 18 09:51:12 host pitpat-walk[web]: DEBUG notify bytes=4d 04 01 2f 68 2f 00 08 fc 08 fc 00 00 00 6c 00 00 00 00 00 00 00 00 09 00 02 88 70 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 16 04 66 00 e3 8f 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG write bytes=4d 00 9b 05 6a 05 fd f8 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG write bytes=4d 00 9c 05 6a 05 fd f8 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG write bytes=4d 00 9d 05 6a 05 fd f8 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG notify bytes=4d 04 02 2f 68 2f 00 08 fc 08 fc 00 00 00 6c 00 00 00 00 00 00 00 00 09 00 02 8c 58 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e4 aa 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG write bytes=4d 00 9e 05 6a 05 fd f8 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG write bytes=4d 00 9f 05 6a 05 fd f8 43
+Nov 18 09:51:13 host pitpat-walk[web]: DEBUG notify bytes=4d 04 03 2f 68 2f 00 08 fc 08 fc 00 00 00 6c 00 00 00 00 00 00 00 00 09 00 02 8c 58 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e5 ab 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG write bytes=4d 00 a0 05 6a 05 fd f8 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG write bytes=4d 00 a1 05 6a 05 fd f8 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG write bytes=4d 00 a2 05 6a 05 fd f8 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG notify bytes=4d 04 04 2f 68 2f 00 08 fc 08 fc 00 00 00 6d 00 00 00 00 00 00 00 00 09 00 02 90 40 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e5 ae 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG write bytes=4d 00 a3 05 6a 05 fd f8 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG write bytes=4d 00 a4 05 6a 05 fd f8 43
+Nov 18 09:51:14 host pitpat-walk[web]: DEBUG notify bytes=4d 04 05 2f 68 2f 00 08 fc 08 fc 00 00 00 6d 00 00 00 00 00 00 00 00 09 00 02 90 40 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e6 ad 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG write bytes=4d 00 a5 05 6a 05 fd f8 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG write bytes=4d 00 a6 05 6a 05 fd f8 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG write bytes=4d 00 a7 05 6a 05 fd f8 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG notify bytes=4d 04 06 2f 68 2f 00 08 fc 08 fc 00 00 00 6e 00 00 00 00 00 00 00 00 09 00 02 94 28 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e7 c3 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG write bytes=4d 00 a8 05 6a 05 fd f8 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG write bytes=4d 00 a9 05 6a 05 fd f8 43
+Nov 18 09:51:15 host pitpat-walk[web]: DEBUG notify bytes=4d 04 07 2f 68 2f 00 08 fc 08 fc 00 00 00 6e 00 00 00 00 00 00 00 00 09 00 02 94 28 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e7 c3 43
+Nov 18 09:51:16 host pitpat-walk[web]: DEBUG write bytes=4d 00 aa 05 6a 05 fd f8 43
+Nov 18 09:51:16 host pitpat-walk[web]: DEBUG write bytes=4d 00 ab 05 6a 05 fd f8 43
+Nov 18 09:51:16 host pitpat-walk[web]: DEBUG write bytes=4d 00 ac 05 6a 05 fd f8 43
+Nov 18 09:51:16 host pitpat-walk[web]: DEBUG notify bytes=4d 04 08 2f 68 2f 00 08 fc 08 fc 00 00 00 6e 00 00 00 00 00 00 00 00 09 00 02 98 10 5a 1b 8b 17 70 00 05 00 00 00 00 00 00 00 00 00 18 04 66 00 e8 f8 43
+Nov 18 09:51:16 host pitpat-walk[web]: DEBUG write bytes=4d 00 ad 05 6a 05 fd f8 43

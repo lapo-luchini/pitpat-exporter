@@ -24,7 +24,8 @@ pub struct Config {
     #[arg(long, env = "PITPAT_ADAPTER")]
     pub adapter: Option<String>,
 
-    /// Treadmill MAC address; default = scan for the fba0 advertising UUID.
+    /// Treadmill MAC address; default = scan for the fba0 advertising UUID
+    /// or a "PitPat…" name (SupeRun models advertise no service, §4.1).
     #[arg(long, env = "PITPAT_ADDRESS")]
     pub address: Option<String>,
 
@@ -59,6 +60,11 @@ pub struct Config {
     /// Use the simulator instead of real Bluetooth.
     #[arg(long, env = "PITPAT_SIMULATE")]
     pub simulate: bool,
+
+    /// Treadmill model the simulator speaks: pitpat (fba0) or superun
+    /// (ffff, e.g. PitPat-T01; §3.7).
+    #[arg(long, env = "PITPAT_SIMULATE_MODEL", default_value = "pitpat", value_parser = ["pitpat", "superun"])]
+    pub simulate_model: String,
 
     /// Disconnect after this many seconds stopped with no API activity
     /// and sleep (no reconnect) until a control call wakes the daemon;

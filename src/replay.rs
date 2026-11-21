@@ -4,8 +4,9 @@
 //! see its README): the frames logged by the old daemon are fed to the
 //! core exactly in order, so the decoder and the session rules are
 //! checked against real hardware without the treadmill (REVIEW round-17
-//! N3). All files are device-a; a `device-b/` folder gets its own decoder
-//! (§3.2) and its own replay tests here.
+//! N3). `device-a/` is the fba0 pad (`68 32`/`68 34` frames); `device-b/`
+//! is the SupeRun-built PitPat-T01 (framed `4d 04 … 68 2f`, §3.7), read by
+//! its own decoder (§3.2a) and with its own replay test here.
 
 use jiff::civil::DateTime;
 use std::path::PathBuf;
@@ -104,7 +105,7 @@ fn parse_ts(year: i16, mon: &str, day: &str, hms: &str) -> Option<DateTime> {
     Some(jiff::civil::date(year, mon, day).at(h, m, s, 0))
 }
 
-/// The committed device-a captures, name plus contents (embedded, so
+/// The committed captures, name plus contents (embedded, so
 /// `cargo test` and the nix build both see them, wherever they run from).
 const CAPTURES: &[(&str, i16, &str)] = &[
     (
@@ -126,6 +127,11 @@ const CAPTURES: &[(&str, i16, &str)] = &[
         "2026-11-17-walk-60-steps.log",
         2026,
         include_str!("../tests/captures/device-a/2026-11-17-walk-60-steps.log"),
+    ),
+    (
+        "2026-11-18-walk-20-steps.log",
+        2026,
+        include_str!("../tests/captures/device-b/2026-11-18-walk-20-steps.log"),
     ),
 ];
 
@@ -150,9 +156,9 @@ fn captures_are_parsed_in_order() {
     }
 }
 
-/// Decoder tests on every file (REVIEW round-17 N3): every `68 32`/`68 34`
-/// frame decodes, the decoded state matches the `state=` text the old
-/// daemon logged next to the frame, and `68 32` frames carry `steps`
+/// Decoder tests on every file (REVIEW round-17 N3): every status frame
+/// decodes, the decoded state matches the `state=` text the old daemon
+/// logged next to the frame, and `68 32` and T01 frames carry `steps`
 /// while `68 34` frames do not (K7).
 #[test]
 fn every_capture_frame_decodes() {
@@ -171,9 +177,13 @@ fn every_capture_frame_decodes() {
                     f.ts
                 );
             }
+            let with_steps = match p::decoder_for(&f.bytes).name() {
+                "device-a" => f.bytes[1] == 0x32,
+                name => name == "superun-t01",
+            };
             assert_eq!(
                 st.steps.is_some(),
-                f.bytes[1] == 0x32,
+                with_steps,
                 "{name}: steps presence at {:?}",
                 f.ts
             );
@@ -201,6 +211,73 @@ fn replay_step_styles() {
     assert_eq!(recs.len(), 1, "one session for the walk");
     assert_eq!(recs[0].steps, 446, "final step count, not 0");
     assert_eq!(recs[0].end_reason, "stopped");
+}
+
+/// device-b (PitPat-T01): the frames decode from their headers alone, as
+/// no SupeRun link is set up here. The belt runs for the whole capture,
+/// so the walk is one open session whose steps and distance follow the
+/// belt: 213 -> 232 over the 20 steps counted in the third recording,
+/// 100 -> 110 m.
+#[test]
+fn replay_t01_walk_20_steps() {
+    // the counted recording starts at 09:51:01 (see the capture's header)
+    let counted = parse_ts(2026, "Nov", "18", "09:51:01");
+    let mut at_counted = None;
+    let (core, metrics, frames) = feed("2026-11-18-walk-20-steps.log", |c, ts| {
+        if at_counted.is_none() && ts == counted {
+            let s = c.snapshot().session.expect("session open");
+            at_counted = Some((s.start, s.steps, s.distance_m));
+        }
+    });
+    assert_eq!(
+        metrics.invalid_packets_total.get(),
+        0,
+        "every frame decodes"
+    );
+    let (start, steps, dist) = at_counted.expect("a frame at 09:51:01");
+    assert_eq!((steps, dist), (213, 100));
+    let ses = core.snapshot().session.expect("one open session");
+    assert_eq!(ses.start, start, "not split");
+    assert_eq!((ses.steps, ses.distance_m), (232, 110));
+    assert!((core.snapshot().speed_kmh - 2.31).abs() < 0.01);
+    assert!(
+        frames.iter().any(|f| f.write),
+        "keep-alive writes are parsed too"
+    );
+}
+
+/// Feed every notification frame of one capture to a fresh core, calling
+/// `after` with the core and the frame time after each one.
+fn feed(
+    name: &str,
+    mut after: impl FnMut(&Core, Option<DateTime>),
+) -> (Core, Arc<Metrics>, Vec<Frame>) {
+    let (_, frames) = all_captures()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .unwrap_or_else(|| panic!("{name}: capture not committed"));
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("pitpat-replay-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (events, _ev_rx) = tokio::sync::broadcast::channel(8);
+    let (_, api_rx) = tokio::sync::mpsc::channel(32);
+    let metrics = Arc::new(Metrics::new());
+    let mut core = Core::new(
+        DaemonCfg::from(&clap::Parser::parse_from(["pitpat"])),
+        Totals::default(),
+        metrics.clone(),
+        events,
+        api_rx,
+        dir,
+    );
+    core.begin_connection(None);
+    for f in &frames {
+        if !f.write {
+            core.on_packet(&f.bytes);
+            after(&core, f.ts);
+        }
+    }
+    (core, metrics, frames)
 }
 
 /// Feed every notification frame of one capture to a fresh core and

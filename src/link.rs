@@ -43,12 +43,20 @@ impl LinkT for Link {
 /// Abstract notification/packet pair, so the core pump and its tests can
 /// drive any connection: real Link/Conn enums or scripted fake links.
 pub trait Notify {
+    /// Next notification, raw as the treadmill sent it. Must be
+    /// cancel-safe: with a timer keep-alive (§3.7) the pump drops a
+    /// pending call on every tick and calls again, so a dropped call must
+    /// not lose a packet or restart its wait.
     async fn recv_notification(&mut self) -> Result<Vec<u8>, LinkError>;
     async fn write_packet(&mut self, pkt: &[u8]) -> Result<(), LinkError>;
     /// Device address for the API view (§6.2).
     fn address(&self) -> String;
     /// Drop the underlying LE link, if any (§4.6 / REVIEW round-2 A4).
     async fn disconnect(&mut self);
+    /// Protocol family of the connected treadmill (§3.7).
+    fn variant(&self) -> crate::protocol::Variant {
+        crate::protocol::Variant::PitPat
+    }
 }
 
 macro_rules! delegate {
@@ -65,6 +73,9 @@ macro_rules! delegate {
             }
             async fn disconnect(&mut self) {
                 match self { $(Conn::$v(c) => c.disconnect().await,)* }
+            }
+            fn variant(&self) -> crate::protocol::Variant {
+                match self { $(Conn::$v(c) => c.variant,)* }
             }
         }
     };

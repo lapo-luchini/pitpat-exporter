@@ -111,6 +111,8 @@ the write characteristic: the next queued command if there is one, otherwise the
 `6a 05 fd f8 43`. Commands are *only* sent this way (never spontaneously). The notification rate is
 whatever the treadmill uses (expected ~1–2 Hz); log it at debug level.
 
+SupeRun-built models use service `ffff` and a timer keep-alive instead: see §3.7.
+
 ### 3.2 Status notification (treadmill → host)
 
 Packets shorter than 31 bytes are **invalid**: log at debug level, count them in
@@ -159,9 +161,12 @@ accounting in, then keeps the values mirrored while running.
 
 The decoder is behind a per-model boundary (`FrameDecoder` in
 `protocol.rs`): one implementation per frame layout, picked from the
-frame header — `68 32`/`68 34` select `DeviceA`; a packet with any other
+frame header — `68 32`/`68 34` select `DeviceA`; `4d 04 <seq> 2f` around
+an inner `68 2f` selects `SupeRunT01` (§3.7); a packet with any other
 header is rejected (logged as invalid), so the daemon never invents a
-layout it has not seen. A second treadmill model gets its own
+layout it has not seen. Frames say which family they are: the decoder
+does not depend on the link, so captures replay without BLE and the
+debug log's `model=` field names the decoder that read the frame. A second treadmill model gets its own
 implementation plus its own replay tests, without touching device-a's.
 
 Real logs from PitPat treadmills live in `tests/captures/` (one folder
@@ -171,7 +176,10 @@ hex bytes after `bytes=`, in file order, with the line timestamps —
 check that every frame decodes and matches the `state=` text the old
 daemon logged, and feed the two 2026-11-17 walks to the core to assert
 one session per walk and the final step counts (268 and 446, the
-regression check for the old `steps=0` bug). The captures are embedded
+regression check for the old `steps=0` bug), and feed the device-b
+PitPat-T01 walk with no SupeRun link set up (frames decode from their
+headers) to assert one open session and the belt's step count over 20
+counted steps (213 → 232). The captures are embedded
 with `include_str!`, so both `cargo test` and the nix build see them.
 
 ### 3.3 Command packet (host → treadmill), 23 bytes
@@ -237,6 +245,52 @@ The reference implementation holds one pending packet and silently drops older o
   `v` (at most ~10 s), so the remote pickup doesn't erase the user's speed. Resume from paused
   honours the Start speed and the reassertion stays silent.
 
+### 3.7 SupeRun-built models (e.g. `PitPat-T01`)
+
+Some PitPat pads are built by SupeRun and speak a framed variant of the same protocol
+(reverse-engineered by [hdxsfbr/walkingpad](https://github.com/hdxsfbr/walkingpad); checked on a
+`PitPat-T01`, Nov 18 trace). The daemon picks the variant from the GATT services after
+connecting: `fba0` → §3.1–3.6 unchanged; otherwise `ffff` → this section.
+
+| Item | UUID |
+|---|---|
+| Service | `0000ffff-0000-1000-8000-00805f9b34fb` |
+| Write characteristic (commands) | `0000ff01-0000-1000-8000-00805f9b34fb` |
+| Notify characteristic (status) | `0000ff02-0000-1000-8000-00805f9b34fb` |
+
+- **Advertising:** no service UUID, only the name (`PitPat…` / `PITPAT…`), so discovery also
+  matches by name (§4.1).
+- **Framing:** every packet, both ways, is wrapped as `4d 00 <seq> <len>` + packet (the
+  treadmill's own frames start `4d 04`). `seq` is a u8 that starts at 0 on every connection and
+  wraps; `len` is the inner length. A notification whose second byte is not `04` or whose `len`
+  is not its length minus 4 (truncated, or two frames merged) is invalid (§3.2).
+- **Keep-alive:** the host writes on a **fixed 200 ms timer**, never in reply to a notification:
+  the next queued command if there is one, otherwise the framed heartbeat
+  `4d 00 <seq> 05 6a 05 fd f8 43`. The §3.5 retry rule is unchanged (retries go out on the next
+  tick, re-framed with a new `seq`). Writes are Write Requests when the characteristic allows
+  them, Write Commands otherwise.
+- **Commands:** the §3.3 shape with these differences: speed (6–7) is **mph × 1600**, `0` for
+  stop; byte 8 is `0x01` for set-speed and `0x05` for start / pause / stop; byte 10 is `0x58`
+  (fixed, like the reference controller); byte 12 is `0x0c` start or set-speed, `0x0a` pause,
+  `0x08` stop; bytes 13–20 are `00 00 00 00 00 0c 55 70` (all zero for stop); checksum and end
+  byte as §3.3.
+- **Status:** a 47-byte `68 2f` frame with the §3.2 offsets, except: speeds (@3, @5) are
+  **mph × 1600**, and distance (@7) is **metres** although the flags byte has the imperial bit set.
+  Steps are u16 @43 in these frames too. It is read by the `SupeRunT01` decoder (§3.2a), which
+  normalises to SI, rounds speeds to 0.01 km/h (so a commanded 0.1-step speed reads back exactly,
+  §3.6) and clears the imperial bit. The other differences (UUIDs, keep-alive, command encoding,
+  framing) belong to the link: `Variant` in `protocol.rs`.
+
+Golden vectors (seq as shown, speeds in km/h):
+
+```
+heartbeat (seq 7)      4d 00 07 05 6a 05 fd f8 43
+start     2.0 (seq 3)  4d 00 03 17 6a 17 00 00 00 00 07 c4 05 00 58 00 0c 00 00 00 00 00 0c 55 70 ac 43
+set_speed 4.5 (seq 4)  4d 00 04 17 6a 17 00 00 00 00 11 7a 01 00 58 00 0c 00 00 00 00 00 0c 55 70 00 43
+pause     3.0 (seq 5)  4d 00 05 17 6a 17 00 00 00 00 0b a7 05 00 58 00 0a 00 00 00 00 00 0c 55 70 c5 43
+stop          (seq 6)  4d 00 06 17 6a 17 00 00 00 00 00 00 05 00 58 00 08 00 00 00 00 00 00 00 00 42 43
+```
+
 ---
 
 ## 4. Daemon behaviour
@@ -244,8 +298,9 @@ The reference implementation holds one pending packet and silently drops older o
 ### 4.1 Connection
 - Adapter: config `adapter` (default: BlueZ default adapter).
 - Device: if config `address` is set, connect to it directly (discovering if not yet known to
-  BlueZ); otherwise scan for devices advertising service `fba0` and use the first one found. Log
-  the address so the user can pin it.
+  BlueZ); otherwise scan for devices advertising service `fba0` (or `ffff`), or named
+  `PitPat…`/`PITPAT…` (SupeRun models advertise no service, §3.7), and use the first one found.
+  Log the address so the user can pin it. The protocol variant comes from the GATT services.
 - No pairing/bonding is required (the web version doesn't pair).
 - On disconnect or any BLE error: state becomes `disconnected`, end the open session (§4.3), and
   reconnect with exponential backoff 1 s → 2 s → … capped at 30 s, forever. Count reconnects in
@@ -343,7 +398,8 @@ On SIGTERM/SIGINT: if the treadmill is running or paused, send **stop** (wait up
 go out via the notification cycle), close the session, persist totals, disconnect, exit 0.
 
 ### 4.7 Simulator (`--simulate`)
-`SimLink` emits a notification every 500 ms. It reacts to the commands like a real treadmill:
+`SimLink` emits a notification every 500 ms (`--simulate-model superun`: framed SupeRun frames,
+§3.7, so the timer keep-alive path is exercised too). It reacts to the commands like a real treadmill:
 start → `starting` for 3 s → `running` with the speed ramping at 0.5 km/h per second to the
 **belt's own default (1.0)** — like the hardware, it ignores the start command's speed field, so
 the daemon's corrective `SetSpeed` is exercised; pause/stop as expected; counters advance from
@@ -372,6 +428,7 @@ No config file.
 | `--default-speed` | `2.0` | km/h |
 | `--presets` | `2,3,4` | km/h, up to 6 values, shown in GUIs |
 | `--simulate` | off | use SimLink |
+| `--simulate-model` | `pitpat` | `pitpat` or `superun` (§3.7) |
 | `--log` | `info` | tracing filter |
 
 The client subcommands accept `--url` (default `http://127.0.0.1:9839`, env `PITPAT_URL`) and

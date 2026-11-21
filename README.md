@@ -8,6 +8,11 @@ Protocol reverse-engineering credit: the [PitPat-WebBT](https://github.com/Keira
 project (`treadmill.js`). Writes must be ATT **Write Requests** (`writeValue` with response) —
 the treadmill silently ignores Write Commands.
 
+SupeRun-built PitPat pads (e.g. `PitPat-T01`, GATT service `ffff`) are supported too: the
+daemon finds them by name and picks the protocol from the services it sees (SPEC §3.7; credit:
+[hdxsfbr/walkingpad](https://github.com/hdxsfbr/walkingpad)). Try it without hardware with
+`pitpat daemon --simulate --simulate-model superun`.
+
 ## Components
 
 - `pitpat daemon` — single process owning the BLE connection on demand, with an HTTP/JSON

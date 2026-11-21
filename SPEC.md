@@ -526,6 +526,11 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
 - Pure QML, Plasma 6 API (`metadata.json` with `"KPackageStructure": "Plasma/Applet"`,
   `"X-Plasma-API-Minimum-Version": "6.0"`, `Id: it.lapo.pitpat`, license ISC, author as above).
   Use `PlasmoidItem`, `PlasmaComponents3`, `Kirigami` per current Plasma 6 conventions.
+  About page: `metadata.json` keeps `"License": "ISC"` (the true license) even though
+  Plasma's Read License button then shows its "no licensing terms" placeholder —
+  `KCoreAddons`' `KAboutLicense::byKeyword` only resolves a fixed keyword set
+  (GPL/LGPL/BSD/Apache/Artistic/MIT) and offers no way for metadata to carry the
+  text; switching the key to MIT or BSD would mislabel the license.
 - Talks to the daemon with `XMLHttpRequest`. Poll `/api/state` every 1 s while the popup is open
   or the belt is moving, otherwise every 10 s.
 - **Compact representation** (panel): one `RowLayout` holding the icon

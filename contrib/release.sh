@@ -6,12 +6,14 @@
 #
 #   contrib/release.sh X.Y.Z
 #
-# Requirements it enforces up front: a clean tree, the `trunk` branch, and
-# a version strictly newer than the current one (numeric, not string,
-# compare). It sets the version in Cargo.toml, refreshes Cargo.lock with
-# cargo (never by hand) and rewrites the plasmoid's metadata.json with jq;
-# then `cargo test`, a `release X.Y.Z` commit and an annotated tag
-# `X.Y.Z` with the message `Version X.Y.Z`, like the existing tags.
+# Requirements it enforces up front: a clean tree, HEAD on `trunk`
+# (attached, or detached on trunk's commit — R6: how jj's colocated repo
+# leaves git), and a version strictly newer than the current one
+# (numeric, not string, compare). It sets the version in Cargo.toml,
+# refreshes Cargo.lock with cargo (never by hand) and rewrites the
+# plasmoid's metadata.json with jq; then `cargo test`, a `release X.Y.Z`
+# commit and a signed tag `X.Y.Z` with the message `Version X.Y.Z`, like
+# the existing tags.
 #
 # The last local gate against a wrong version becoming public is the
 # pre-push hook in contrib/githooks (see README's Releasing section);
@@ -26,13 +28,59 @@ new="$1"
 
 cd "$(dirname "$0")/.."
 
+# R7: on NixOS, cargo and jq usually live only in the nix dev shell. If
+# any tool is missing, re-exec inside `nix develop` (guard variable so
+# this cannot loop; --extra-experimental-features is harmless when
+# flakes are already on). The check is on missing tools, not on NixOS,
+# so it helps on any machine with nix and does nothing where the tools
+# are installed.
+missing=""
+for tool in cargo jq; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+    if [ "${PITPAT_RELEASE_NIX:-}" = 1 ]; then
+        echo "refusing: even inside the nix dev shell these tools are" \
+            "missing:$missing" >&2
+        exit 1
+    fi
+    if ! command -v nix >/dev/null 2>&1; then
+        echo "refusing: missing tools:$missing and no nix on PATH to get" \
+            "them (install cargo and jq, or run from a nix dev shell)" >&2
+        exit 1
+    fi
+    self="$(readlink -f "$0")"
+    echo "missing tools:$missing — re-running inside the nix dev shell"
+    export PITPAT_RELEASE_NIX=1
+    exec nix develop "$PWD" \
+        --extra-experimental-features 'nix-command flakes' \
+        --command "$self" "$@"
+fi
+
+# R6: the branch check accepts HEAD attached to trunk, or HEAD detached
+# on trunk's commit (how a jj-colocated repo leaves git after
+# `jj new trunk`); anything else is refused with the commit HEAD is on
+detached=""
 branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
-if [ "$branch" != "trunk" ]; then
-    echo "refusing: releases are cut from trunk (on '$branch')" >&2
-    exit 1
+if [ "$branch" = "trunk" ]; then
+    :
+else
+    head_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    trunk_commit="$(git rev-parse refs/heads/trunk 2>/dev/null || true)"
+    if [ -z "$branch" ] && [ -n "$head_commit" ] \
+        && [ "$head_commit" = "$trunk_commit" ]; then
+        detached=1
+        old_commit="$head_commit"
+    else
+        echo "refusing: releases are cut from trunk (HEAD is on" \
+            "$([ -n "$branch" ] && echo "branch '$branch'" || echo "detached $head_commit"))" \
+            "; attach with 'git switch trunk', with jj: 'jj new trunk'" >&2
+        exit 1
+    fi
 fi
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-    echo "refusing: the working tree is not clean" >&2
+    echo "refusing: the working tree is not clean" \
+        "(with jj: 'jj new trunk', then check '@')" >&2
     exit 1
 fi
 
@@ -92,9 +140,26 @@ if ! git tag -s "$new" -m "Version $new"; then
         "commit was undone and the tree is restored" >&2
     exit 1
 fi
+# R6: on a detached HEAD the commit was made while HEAD stays detached,
+# and the tag points at it — only now move the branch, with a
+# compare-and-swap so a trunk that moved in the meantime cannot be
+# clobbered. On an attached HEAD this does not run (the commit is
+# already on trunk).
+if [ -n "$detached" ]; then
+    new_commit="$(git rev-parse HEAD)"
+    if ! git update-ref refs/heads/trunk "$new_commit" "$old_commit"; then
+        echo "release failed: trunk moved during the release; undoing" \
+            "the commit and the tag" >&2
+        git reset -q --hard "$old_commit"
+        git tag -d "$new" >/dev/null
+        exit 1
+    fi
+    echo "(trunk now points at the release commit; HEAD stays detached" \
+        "on it — with jj the next jj command imports both)"
+fi
 
 echo
 echo "released $new: review the commit and the tag, then push them:"
-echo "  git push --follow-tags"
+echo "  git push --follow-tags origin trunk"
 echo "(the pre-push hook in contrib/githooks refuses a tag whose version"
 echo " does not match the Cargo.toml of the tagged commit)"

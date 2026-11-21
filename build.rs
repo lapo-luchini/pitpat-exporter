@@ -24,21 +24,40 @@ fn describe() -> Option<String> {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=PITPAT_VERSION");
+    // S7: take the paths from git. In a worktree (or a submodule) `.git`
+    // is a file, so the literal `.git/…` paths never exist and cargo
+    // rebuilt every time. `--git-path HEAD` is per worktree; the tags
+    // live in the shared common dir. Git missing (a nix store copy)
+    // prints nothing more; the version falls back as usual.
+    let Some(head_path) = git_out(&["rev-parse", "--git-path", "HEAD"]) else {
+        return;
+    };
+    let common = git_out(&["rev-parse", "--git-common-dir"]).unwrap_or_else(|| ".git".into());
     // S2: the version changes with the commit (HEAD plus the ref it
     // points to) AND with the nearest tag, which tag creation/deletion
     // moves without touching HEAD — so the tag files must also trigger
     // a rebuild, or the version goes stale after a release
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/refs/tags");
-    println!("cargo:rerun-if-changed=.git/packed-refs");
-    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
+    println!("cargo:rerun-if-changed={head_path}");
+    if let Ok(head) = std::fs::read_to_string(&head_path) {
         if let Some(r) = head.trim().strip_prefix("ref: ") {
-            println!("cargo:rerun-if-changed=.git/{r}");
+            println!("cargo:rerun-if-changed={common}/{r}");
         }
     }
+    println!("cargo:rerun-if-changed={common}/refs/tags");
+    println!("cargo:rerun-if-changed={common}/packed-refs");
     let version = env::var("PITPAT_VERSION")
         .ok()
         .or_else(describe)
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
     println!("cargo:rustc-env=PITPAT_VERSION={version}");
+}
+
+/// One git invocation's trimmed stdout, or `None` on any failure.
+fn git_out(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }

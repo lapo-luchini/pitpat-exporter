@@ -159,8 +159,13 @@ To release a new version:
 2. `contrib/release.sh X.Y.Z` — it refuses anything but a clean tree on
    `trunk` and a version strictly newer than the current one, bumps
    `Cargo.toml`, `Cargo.lock` and the plasmoid's `metadata.json`, runs
-   `cargo test`, commits `release X.Y.Z` and tags `X.Y.Z`;
-3. check the commit and the tag, then `git push --follow-tags`.
+   `cargo test`, commits `release X.Y.Z` and tags `X.Y.Z`. It also works
+   with a detached HEAD sitting on trunk's tip (how a jj-colocated repo
+   leaves git after `jj new trunk`): the release commit is made and
+   trunk is moved to it after the tag succeeds; the next `jj` command
+   imports both. If `cargo`/`jq` are not on PATH (typical NixOS), the
+   script re-runs itself inside `nix develop` automatically;
+3. check the commit and the tag, then `git push --follow-tags origin trunk`.
 
 Two guards keep the tags and the version in step: `cargo test`'s
 `version_matches_git_tag` fails when something was tagged without the

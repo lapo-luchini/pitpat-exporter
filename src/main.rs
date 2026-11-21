@@ -53,6 +53,7 @@ enum Cmd {
         client: cli::Client,
         speed: Option<f64>,
     },
+    /// Pause the belt (counters kept).
     Pause {
         #[command(flatten)]
         client: cli::Client,
@@ -72,6 +73,7 @@ enum Cmd {
         #[command(flatten)]
         client: cli::Client,
     },
+    /// Stop the belt (ends the walk).
     Stop {
         #[command(flatten)]
         client: cli::Client,

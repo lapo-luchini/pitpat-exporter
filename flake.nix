@@ -71,6 +71,7 @@
               rust-analyzer
               pkg-config
               dbus
+              jq # R7: contrib/release.sh uses it for metadata.json
             ];
           };
         }

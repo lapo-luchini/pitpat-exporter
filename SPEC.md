@@ -624,7 +624,11 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   coloured dot and the human labels; one hero row (distance / time / speed with the panel's
   formatters); Stop as a ToolButton next to Start/Pause (tooltip "Stop and end the walk"); the
   target section collapses behind a "Target ▸" toggle; last walks with relative dates ("today
-  17:16", "yesterday 09:02") and a separator before the history.
+  17:16", "yesterday 09:02") behind a collapsible "Last walks ▸" toggle (W2) — collapsed by
+  default, the open state remembered in the `lastWalksOpen` config, the popup height following
+  the content so a collapsed section never leaves empty space; a separator before the history.
+  The section order is fixed for every panel edge (no mirroring), so with a bottom panel the
+  collapsed popup puts the controls nearest the panel.
 - **Tooltip:** state, speed, session distance, today's distance.
 - **Notifications** (via the KF6 `org.kde.notification` QML module; if that turns out not to work
   inside a plasmoid, fall back to running `notify-send` through the `executable` engine):

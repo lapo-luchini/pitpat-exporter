@@ -36,6 +36,10 @@
             <label>Keep the popup open when clicking elsewhere</label>
             <default>false</default>
         </entry>
+        <entry name="lastWalksOpen" type="Bool">
+            <label>Whether the Last walks section in the popup is expanded</label>
+            <default>false</default>
+        </entry>
         <entry name="milestoneKm" type="Double">
             <label>Distance milestone notifications, in km of session distance (0 = off)</label>
             <default>1.0</default>

@@ -11,6 +11,12 @@ import org.kde.kirigami as Kirigami
  * the sessions table (only the last 3 sessions), in native Plasma style.
  * Speed/presets stay available while the belt is merely stopped (§3.6);
  * only a disconnected daemon or the starting ramp disables them.
+ * W2: "Last walks" is a collapsible section (like Target), collapsed by
+ * default; the open state lives in the `lastWalksOpen` config and
+ * survives restarts. The order is fixed for every panel edge; with a
+ * bottom panel the collapsed popup puts the controls nearest the panel.
+ * The popup height follows the content, so toggling never leaves empty
+ * space.
  */
 Item {
     id: full
@@ -45,7 +51,9 @@ Item {
 
 
     implicitWidth: Kirigami.Units.gridUnit * 18
-    implicitHeight: Kirigami.Units.gridUnit * 22
+    // W2: the height follows the content, so a collapsed section never
+    // leaves empty space
+    implicitHeight: contentCol.implicitHeight + 2 * Kirigami.Units.smallSpacing
 
     onSnapChanged: {
         const key = (snap.session ? snap.session.start : "")
@@ -97,8 +105,16 @@ Item {
     }
 
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Kirigami.Units.smallSpacing
+        id: contentCol
+        // W2: anchored left/right/top so the layout's implicit height
+        // (which the popup height follows) is authoritative; the margins
+        // are added by the root's implicitHeight
+        anchors {
+            left: parent.left
+            right: parent.right
+            top: parent.top
+            margins: Kirigami.Units.smallSpacing
+        }
         spacing: Kirigami.Units.smallSpacing
 
         // F3: pin — the popup stays open and live-updates during a walk
@@ -330,14 +346,25 @@ Item {
             Layout.fillWidth: true
             visible: full.lastSessions.length > 0
         }
-        PlasmaComponents3.Label {
-            text: i18n("Last walks")
-            font.bold: true
+        // W2: collapsible "Last walks", collapsed by default; the state
+        // lives in the lastWalksOpen config (bound like pin), so it
+        // survives Plasma restarts. Fetching is unchanged — opening the
+        // section shows current data straight away.
+        PlasmaComponents3.ToolButton {
+            id: lastWalksToggle
+            text: Plasmoid.configuration.lastWalksOpen
+                ? i18n("Last walks ▾")
+                : i18n("Last walks ▸")
+            icon.name: "view-history"
+            onClicked: Plasmoid.configuration.lastWalksOpen =
+                !Plasmoid.configuration.lastWalksOpen
         }
         ListView {
             id: sessionList
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            // W2: the height follows the content, so the popup grows and
+            // shrinks with the section (and with Target)
+            Layout.preferredHeight: contentHeight
             clip: true
             spacing: Kirigami.Units.smallSpacing / 2
             model: full.lastSessions
@@ -361,10 +388,11 @@ Item {
                     horizontalAlignment: Text.AlignRight
                 }
             }
-            visible: count > 0
+            visible: count > 0 && Plasmoid.configuration.lastWalksOpen
         }
         PlasmaComponents3.Label {
             visible: full.lastSessions.length === 0
+                && Plasmoid.configuration.lastWalksOpen
             text: full.working ? i18n("no walks yet") : ""
             color: Kirigami.Theme.disabledTextColor
         }

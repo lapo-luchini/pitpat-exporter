@@ -409,7 +409,9 @@ impl Core {
             self.persist_error = Some(reason);
         }
         // K6: retry any session records held back by an earlier failure
-        let held: Vec<_> = self.pending_records.drain(..).collect();
+        // (W3: mem::take over drain(..).collect() — same semantics, and
+        // the new toolchain's drain_collect lint stays quiet)
+        let held = std::mem::take(&mut self.pending_records);
         for rec in held {
             match crate::session::append_session(&self.state_dir, &rec) {
                 Ok(()) => {

@@ -13,6 +13,16 @@ daemon finds them by name and picks the protocol from the services it sees (SPEC
 [hdxsfbr/walkingpad](https://github.com/hdxsfbr/walkingpad)). Try it without hardware with
 `pitpat daemon --simulate --simulate-model superun`.
 
+## Tested hardware
+
+| Model (label) | BLE name | Protocol | Tested by | What was tested |
+|---|---|---|---|---|
+| PitPat BA04 ("Treadmill (BA04)", 1.0–6.0 km/h, max load 136 kg — the range matches the daemon's default `--min-speed`/`--max-speed`) | `Mindtree-HID` — most likely the Bluetooth module firmware's default name, not a product name: a pad advertising it can still be a PitPat. Found by its `fba0` service; no Device Information service (`180a`), so the model is not readable over BLE | service `fba0`, `68 32`/`68 34` frames (SPEC §3.2) | Lapo Luchini, daily use through 1.5.0 | the daemon drives whole walks: start, speed, presets, pause and stop |
+| `PitPat-T01` (as advertised over BLE; the label's model is not known yet) | `PitPat-T01` | SupeRun, service `ffff`, `4d 04 … 68 2f` frames (SPEC §3.7) | Matteo Alvazzi (PR #1), since 1.5.0 | the daemon drives whole walks: start, speed change, pause, resume and stop. The replay test uses his capture, recorded mid-walk with the PitPat Walk web app; the status speed scale is still to be confirmed (known open question, daemon debug capture to come) |
+
+Tested another model? Please open an issue with the model from the label, the BLE name and a
+`--log debug` capture — see [`tests/captures/README.md`](tests/captures/README.md).
+
 ## Components
 
 - `pitpat daemon` — single process owning the BLE connection on demand, with an HTTP/JSON

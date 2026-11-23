@@ -6,7 +6,7 @@ than mixing them.
 
 | Folder | Device | Status frames |
 |---|---|---|
-| `device-a/` | The maintainer's PitPat (BLE name and serial in the `68 34` frame) | `68 34` (52 bytes) on connect, then `68 32` (50 bytes) |
+| `device-a/` | PitPat BA04, BLE name `Mindtree-HID`, serial in the `68 34` frame | `68 34` (52 bytes) on connect, then `68 32` (50 bytes) |
 | `device-b/` | PitPat-T01, SupeRun-built (service `ffff`, §3.7) | `4d 04 <seq> 2f` frames (51 bytes) around a 47-byte `68 2f` packet |
 
 ## File format

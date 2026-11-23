@@ -15,10 +15,24 @@ daemon finds them by name and picks the protocol from the services it sees (SPEC
 
 ## Tested hardware
 
-| Model (label) | BLE name | Protocol | Tested by | What was tested |
+"Whole walks" means start, speed, pause/resume and stop driven by the
+daemon.
+
+| Model (label) | BLE name | Protocol | Tested by | Status |
 |---|---|---|---|---|
-| PitPat BA04 ("Treadmill (BA04)", 1.0–6.0 km/h, max load 136 kg — the range matches the daemon's default `--min-speed`/`--max-speed`) | `Mindtree-HID` — most likely the Bluetooth module firmware's default name, not a product name: a pad advertising it can still be a PitPat. Found by its `fba0` service; no Device Information service (`180a`), so the model is not readable over BLE | service `fba0`, `68 32`/`68 34` frames (SPEC §3.2) | Lapo Luchini, daily use through 1.5.0 | the daemon drives whole walks: start, speed, presets, pause and stop |
-| `PitPat-T01` (as advertised over BLE; the label's model is not known yet) | `PitPat-T01` | SupeRun, service `ffff`, `4d 04 … 68 2f` frames (SPEC §3.7) | Matteo Alvazzi (PR #1), since 1.5.0 | the daemon drives whole walks: start, speed change, pause, resume and stop. The replay test uses his capture, recorded mid-walk with the PitPat Walk web app; the status speed scale is still to be confirmed (known open question, daemon debug capture to come) |
+| PitPat BA04 | `Mindtree-HID` | `fba0`, `68 32`/`68 34` (SPEC §3.2) | Lapo Luchini | whole walks, daily use |
+| `PitPat-T01`¹ | `PitPat-T01` | SupeRun `ffff`, `4d 04 … 68 2f` (SPEC §3.7) | Matteo Alvazzi | whole walks; speed scale to be confirmed |
+
+- **BA04:** the label reads "Treadmill (BA04)", 1.0–6.0 km/h (the
+  daemon's default `--min-speed`/`--max-speed`), max load 136 kg.
+  `Mindtree-HID` is most likely the Bluetooth module's default name, so
+  a pad advertising it can still be a PitPat: the daemon finds it by its
+  `fba0` service. It has no Device Information service, so the model
+  can't be read over BLE.
+- **T01:** ¹ name as advertised; the label's model isn't known yet.
+  Supported since 1.5.0 (PR #1). The replay test uses a capture recorded
+  mid-walk with the PitPat Walk web app. Whether status speeds are
+  mph × 1600 or km/h × 1000 waits for a daemon debug capture.
 
 Tested another model? Please open an issue with the model from the label, the BLE name and a
 `--log debug` capture — see [`tests/captures/README.md`](tests/captures/README.md).

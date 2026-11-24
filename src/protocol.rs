@@ -265,8 +265,9 @@ impl FrameDecoder for UnknownModel {
 }
 
 /// SupeRun-built PitPat-T01 (§3.7): `4d 04 <seq> 2f` frames around a
-/// 47-byte `68 2f` packet with the §3.2 offsets, speeds in mph × 1600,
-/// distance in metres although the imperial bit is set.
+/// 47-byte `68 2f` packet with the §3.2 offsets, speeds in km/h × 1000
+/// (commands are mph × 1600), distance in metres although the imperial
+/// bit is set.
 pub struct SupeRunT01;
 
 impl FrameDecoder for SupeRunT01 {
@@ -275,9 +276,11 @@ impl FrameDecoder for SupeRunT01 {
     }
 
     /// The values come out in SI and the imperial bit is cleared, so
-    /// nothing downstream converts them again. Speeds are rounded to
-    /// 0.01 km/h: a commanded 3.0 km/h comes back as 3.0005 from
-    /// mph × 1600, and the §3.6 reassertion compares exactly.
+    /// nothing downstream converts them again. Status speeds are
+    /// km/h × 1000 like §3.2 (2026-11-24 capture: `0b 54` = 2900 while
+    /// the belt's own distance and time counters give 2.899 km/h; as
+    /// mph × 1600 it would read 2.917), so a commanded 3.0 reads back
+    /// as exactly 3.0 for the §3.6 reassertion.
     fn decode_status(&self, raw: &[u8]) -> Option<Status> {
         // `4d 04`: the treadmill's own frames (the host's are `4d 00`)
         if raw.get(1) != Some(&0x04) {
@@ -289,7 +292,7 @@ impl FrameDecoder for SupeRunT01 {
         }
         let mut st = DeviceA.decode_status(pkt)?;
         let be16 = |i: usize| u16::from_be_bytes([pkt[i], pkt[i + 1]]);
-        let kmh = |i: usize| (be16(i) as f64 / 1600.0 * MI_TO_KM * 100.0).round() / 100.0;
+        let kmh = |i: usize| be16(i) as f64 / 1000.0;
         st.speed_mps = kmh(3) / 3.6;
         st.target_speed_kmh = kmh(5);
         st.distance_m = u32::from_be_bytes([pkt[7], pkt[8], pkt[9], pkt[10]]);
@@ -391,9 +394,9 @@ pub fn encode_superun_status(
     let full = encode_status(belt, false, 0.0, 0.0, distance_m, steps, kcal, duration_s);
     let mut p = full[..47].to_vec();
     p[1] = 0x2f;
-    let mph1600 = |v: f64| (v / MI_TO_KM * 1600.0).round().clamp(0.0, 65535.0) as u16;
-    p[3..5].copy_from_slice(&mph1600(speed_kmh).to_be_bytes());
-    p[5..7].copy_from_slice(&mph1600(target_speed_kmh).to_be_bytes());
+    let kmh1000 = |v: f64| (v * 1000.0).round().clamp(0.0, 65535.0) as u16;
+    p[3..5].copy_from_slice(&kmh1000(speed_kmh).to_be_bytes());
+    p[5..7].copy_from_slice(&kmh1000(target_speed_kmh).to_be_bytes());
     p[26] |= 0x80; // the T01 reports imperial, its units are fixed anyway
     p[46] = 0x43;
     let mut raw = superun_frame(seq, &p);
@@ -583,12 +586,13 @@ mod tests {
         assert_eq!((a.steps, b.steps), (Some(213), Some(232)));
         // metres, despite the imperial flag: +10 m in 16 s at 2.3 km/h
         assert_eq!((a.distance_m, b.distance_m), (100, 110));
+        // 08 fc = 2300: km/h × 1000 (§3.7)
         assert!(
-            (a.speed_mps * 3.6 - 2.31).abs() < 0.01,
+            (a.speed_mps * 3.6 - 2.3).abs() < 1e-9,
             "{}",
             a.speed_mps * 3.6
         );
-        assert!((a.target_speed_kmh - 2.31).abs() < 0.01);
+        assert!((a.target_speed_kmh - 2.3).abs() < 1e-9);
         assert_eq!(a.kcal, 8);
         // the same bytes are not a valid classic packet's speed/distance
         assert!(decode_status(&hex("68 2f 00")).is_none());

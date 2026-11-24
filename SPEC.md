@@ -276,11 +276,13 @@ variant from the GATT services after connecting: `fba0` → §3.1–3.6 unchange
   (fixed, like the reference controller); byte 12 is `0x0c` start or set-speed, `0x0a` pause,
   `0x08` stop; bytes 13–20 are `00 00 00 00 00 0c 55 70` (all zero for stop); checksum and end
   byte as §3.3.
-- **Status:** a 47-byte `68 2f` frame with the §3.2 offsets, except: speeds (@3, @5) are
-  **mph × 1600**, and distance (@7) is **metres** although the flags byte has the imperial bit set.
-  Steps are u16 @43 in these frames too. It is read by the `SupeRunT01` decoder (§3.2a), which
-  normalises to SI, rounds speeds to 0.01 km/h (so a commanded 0.1-step speed reads back exactly,
-  §3.6) and clears the imperial bit. The other differences (UUIDs, keep-alive, command encoding,
+- **Status:** a 47-byte `68 2f` frame with the §3.2 offsets, except that distance (@7) is
+  **metres** although the flags byte has the imperial bit set. Speeds (@3, @5) are **km/h × 1000**
+  as in §3.2, unlike the commands: in `device-b/2026-11-24-walk-2-9.log` the status says `0b 54`
+  = 2900 while the belt's own distance and time counters give 2.899 km/h (mph × 1600 would read
+  2.917). Steps are u16 @43 in these frames too. It is read by the `SupeRunT01` decoder (§3.2a),
+  which normalises to SI (a commanded 0.1-step speed reads back exactly, §3.6) and clears the
+  imperial bit. The other differences (UUIDs, keep-alive, command encoding,
   framing) belong to the link: `Variant` in `protocol.rs`.
 
 Golden vectors (seq as shown, speeds in km/h):

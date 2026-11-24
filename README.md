@@ -23,14 +23,15 @@ walks" means start, speed, pause/resume and stop driven by the daemon.
 | Model (label) | BLE name | Protocol | Tested by | Status |
 |---|---|---|---|---|
 | PitPat BA04 | `Mindtree-HID` | `fba0`, `68 32`/`68 34` (SPEC §3.2) | Lapo Luchini | whole walks, daily use |
-| PitPat BA04 | `PitPat-T01` | SupeRun `ffff`, `4d 04 … 68 2f` (SPEC §3.7) | Matteo Alvazzi | whole walks; speed scale to be confirmed |
+| PitPat BA04 | `PitPat-T01` | SupeRun `ffff`, `4d 04 … 68 2f` (SPEC §3.7) | Matteo Alvazzi | whole walks |
 
 - **`Mindtree-HID`:** most likely the Bluetooth module's default name, so a pad advertising it
   can still be a PitPat: the daemon finds it by its `fba0` service. It has no Device Information
   service, so the model can't be read over BLE.
-- **`PitPat-T01`:** SupeRun board. Supported since 1.5.0 (PR #1). The replay test uses a capture
-  recorded mid-walk with the PitPat Walk web app. Whether status speeds are mph × 1600 or
-  km/h × 1000 waits for a daemon debug capture.
+- **`PitPat-T01`:** SupeRun board. Supported since 1.5.0 (PR #1). Its commands carry speed as
+  mph × 1600 but its status as km/h × 1000 (2026-11-24 capture). It takes Write Requests and, like
+  the other board, has no Device Information service. The replay tests use captures recorded with
+  the PitPat Walk web app.
 
 Tested another model? Please open an issue with the model from the label, the BLE name and a
 `--log debug` capture — see [`tests/captures/README.md`](tests/captures/README.md).

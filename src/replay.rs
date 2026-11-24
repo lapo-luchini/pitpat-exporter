@@ -133,6 +133,11 @@ const CAPTURES: &[(&str, i16, &str)] = &[
         2026,
         include_str!("../tests/captures/device-b/2026-11-18-walk-20-steps.log"),
     ),
+    (
+        "2026-11-24-walk-2-9.log",
+        2026,
+        include_str!("../tests/captures/device-b/2026-11-24-walk-2-9.log"),
+    ),
 ];
 
 fn all_captures() -> Vec<(&'static str, Vec<Frame>)> {
@@ -213,6 +218,38 @@ fn replay_step_styles() {
     assert_eq!(recs[0].end_reason, "stopped");
 }
 
+/// device-b (PitPat-T01), 5.5 min at a steady 2.9 km/h: the status speed
+/// is km/h × 1000. The belt's own distance (@7) and session time (@20)
+/// counters, from the first to the last metre tick, give its true speed;
+/// the decoded speed must agree to 0.01 km/h (as mph × 1600 it would read
+/// 2.917, 0.018 off).
+#[test]
+fn replay_t01_speed_scale_2_9() {
+    let mut ticks: Vec<(u32, f64)> = Vec::new(); // (distance m, session time s) at each new metre
+    let (core, metrics, _) = feed("2026-11-24-walk-2-9.log", |c, _| {
+        if let Some(s) = c.snapshot().session {
+            if ticks.last().map(|t| t.0) != Some(s.distance_m) {
+                ticks.push((s.distance_m, s.duration_s));
+            }
+        }
+    });
+    assert_eq!(
+        metrics.invalid_packets_total.get(),
+        0,
+        "every frame decodes"
+    );
+    let snap = core.snapshot();
+    assert!((snap.speed_kmh - 2.9).abs() < 1e-9, "{}", snap.speed_kmh);
+    let (a, b) = (ticks[1], ticks[ticks.len() - 1]); // ticks[0] is mid-metre
+    let belt_kmh = f64::from(b.0 - a.0) / (b.1 - a.1) * 3.6;
+    assert!(
+        (belt_kmh - snap.speed_kmh).abs() < 0.01,
+        "odometer {belt_kmh}"
+    );
+    let ses = snap.session.expect("one open session");
+    assert_eq!((ses.steps, ses.distance_m), (1740, 902));
+}
+
 /// device-b (PitPat-T01): the frames decode from their headers alone, as
 /// no SupeRun link is set up here. The belt runs for the whole capture,
 /// so the walk is one open session whose steps and distance follow the
@@ -239,7 +276,7 @@ fn replay_t01_walk_20_steps() {
     let ses = core.snapshot().session.expect("one open session");
     assert_eq!(ses.start, start, "not split");
     assert_eq!((ses.steps, ses.distance_m), (232, 110));
-    assert!((core.snapshot().speed_kmh - 2.31).abs() < 0.01);
+    assert!((core.snapshot().speed_kmh - 2.3).abs() < 1e-9);
     assert!(
         frames.iter().any(|f| f.write),
         "keep-alive writes are parsed too"

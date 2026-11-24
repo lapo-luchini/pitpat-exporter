@@ -250,7 +250,7 @@ The reference implementation holds one pending packet and silently drops older o
 Some PitPat pads are built by SupeRun and speak a framed variant of the same protocol
 (reverse-engineered by [hdxsfbr/walkingpad](https://github.com/hdxsfbr/walkingpad); checked on a
 `PitPat-T01`, Nov 18 trace). The T01 seen so far is labelled "Treadmill (BA04)" — the same model
-as `device-a/` — so the label's model says nothing about the protocol: the daemon picks the
+as `device-a/`, so the label's model says nothing about the protocol. The daemon picks the
 variant from the GATT services after connecting: `fba0` → §3.1–3.6 unchanged; otherwise `ffff`
 → this section.
 

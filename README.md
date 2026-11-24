@@ -15,11 +15,10 @@ daemon finds them by name and picks the protocol from the services it sees (SPEC
 
 ## Tested hardware
 
-The same label model has shipped with two different Bluetooth boards; the daemon tells them
-apart by GATT service (SPEC §3.7), with no configuration needed. "Whole walks" means start,
-speed, pause/resume and stop driven by the daemon. Both pads carry the label
-"Treadmill (BA04)", 1.0–6.0 km/h (the daemon's default `--min-speed`/`--max-speed`), max load
-136 kg.
+Both pads below carry the label "Treadmill (BA04)", 1.0–6.0 km/h (the daemon's default
+`--min-speed`/`--max-speed`), max load 136 kg, but they have different Bluetooth boards. The
+daemon tells them apart by GATT service (SPEC §3.7), with no configuration needed. "Whole
+walks" means start, speed, pause/resume and stop driven by the daemon.
 
 | Model (label) | BLE name | Protocol | Tested by | Status |
 |---|---|---|---|---|

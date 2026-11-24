@@ -353,7 +353,7 @@ const RECHECK: Duration = Duration::from_secs(1);
 /// The scan proper, apart from BlueZ so it can be tested: probe every
 /// device the stream reports, re-probe the unnamed ones on their own 1 s
 /// schedule, and give up after `window`. Both clocks are checked on every
-/// pass, so a stream that never pauses (no UUID filter, busy neighbours)
+/// pass, and the deadline also between the probes of a re-check pass, so a stream that never pauses (no UUID filter, busy neighbours)
 /// can neither keep the scan alive forever nor starve the re-checks.
 /// Returns the first treadmill found.
 async fn scan_loop<A, S, F, Fut>(events: S, window: Duration, mut probe: F) -> Option<A>
@@ -376,6 +376,11 @@ where
             () = &mut deadline => return None,
             _ = recheck.tick() => {
                 for addr in unnamed.clone() {
+                    // each probe is two D-Bus calls: with many nameless
+                    // beacons one pass alone could outlast the window
+                    if deadline.is_elapsed() {
+                        return None;
+                    }
                     match probe(addr).await {
                         Probe::Treadmill => return Some(addr),
                         Probe::Unnamed => {}
@@ -544,6 +549,33 @@ mod tests {
         let found = tokio::time::timeout(Duration::from_secs(60), scan).await;
         assert_eq!(found, Ok(None), "the scan must give up, not run forever");
         assert!(Instant::now() - t0 <= Duration::from_secs(11));
+    }
+
+    /// A re-check pass over many nameless devices stops at the deadline
+    /// instead of probing them all first.
+    #[tokio::test(start_paused = true)]
+    async fn recheck_pass_stops_at_the_deadline() {
+        let t0 = Instant::now();
+        // first sightings answer at once; every re-check probe takes 300 ms,
+        // so the pass that starts at 1 s would take 18 s
+        let mut seen = HashSet::new();
+        let scan = scan_loop(
+            futures::stream::iter(0..60),
+            Duration::from_secs(10),
+            |addr| {
+                let again = !seen.insert(addr);
+                async move {
+                    if again {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                    }
+                    Probe::Unnamed
+                }
+            },
+        );
+        let found = tokio::time::timeout(Duration::from_secs(120), scan).await;
+        assert_eq!(found, Ok(None));
+        // the window is 10 s, and one probe may be in flight when it ends
+        assert!(Instant::now() - t0 <= Duration::from_millis(10_300));
     }
 
     /// A T01 seen first without a name is looked at again every second,

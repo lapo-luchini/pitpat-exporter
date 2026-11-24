@@ -35,6 +35,7 @@ Plain text, as it came out of the daemon or `journalctl`. A test should look onl
 | File | What it shows |
 |---|---|
 | `2026-11-18-walk-20-steps.log` | Not a daemon log: three back-to-back recordings from the PitPat Walk web app (Web Bluetooth), converted line by line to this format (see its header). The belt runs at status speed `08 fc` the whole time and the page only writes the framed keep-alive every 200 ms: no start, speed change or stop. 20 hand-counted steps in the third recording, where the belt's count goes 213 → 232 and distance 100 → 110 m. No BLE address (Web Bluetooth hides it). `frames.awk` reads `68 32` frames only, so it prints nothing for this file. |
+| `2026-11-24-walk-2-9.log` | Not a daemon log either: one 5.5-minute recording from the web app, converted the same way, the belt running at a steady 2.9 km/h set before it began; keep-alive writes only. It settles the status speed scale (§3.7): `0b 54` = 2900 while the belt's own distance and time counters give 2.899 km/h. Its header also notes the write characteristic's properties and the missing Device Information service. |
 
 ## Adding a capture from another treadmill
 

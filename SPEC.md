@@ -626,7 +626,10 @@ for `running`, `starting…`, `paused`, `stopped`, `asleep` for
   target section collapses behind a "Target ▸" toggle; last walks with relative dates ("today
   17:16", "yesterday 09:02") behind a collapsible "Last walks ▸" toggle (W2) — collapsed by
   default, the open state remembered in the `lastWalksOpen` config, the popup height following
-  the content so a collapsed section never leaves empty space; a separator before the history.
+  the content so a collapsed section never leaves empty space. The height is pinned to the
+  content with the layout limits (`Layout.minimumHeight` = `Layout.maximumHeight` =
+  `implicitHeight`), because Plasma saves the popup size on every hide (`AppletPopup::hideEvent`)
+  and a saved size then overrides the implicit one (Y1); a separator before the history.
   The section order is fixed for every panel edge (no mirroring), so with a bottom panel the
   collapsed popup puts the controls nearest the panel.
 - **Tooltip:** state, speed, session distance, today's distance.

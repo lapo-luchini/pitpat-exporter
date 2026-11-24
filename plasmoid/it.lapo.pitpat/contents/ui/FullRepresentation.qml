@@ -54,6 +54,17 @@ Item {
     // W2: the height follows the content, so a collapsed section never
     // leaves empty space
     implicitHeight: contentCol.implicitHeight + 2 * Kirigami.Units.smallSpacing
+    // Y1: pin the height to the content through the layout limits.
+    // libplasma's AppletPopup saves the popup's size as popupWidth/
+    // popupHeight in AppletPopup::hideEvent — on EVERY hide, not only
+    // after a manual resize — and a saved size then makes updateSize()
+    // return early, so implicitHeight changes are ignored and the popup
+    // would keep whatever height it last had when closed. The minimum/
+    // maximum limits bypass that flag (updateMinSize/updateMaxSize run
+    // unconditionally), so they keep the window at the content's height
+    // while the content itself stays the only variable.
+    Layout.minimumHeight: implicitHeight
+    Layout.maximumHeight: implicitHeight
 
     onSnapChanged: {
         const key = (snap.session ? snap.session.start : "")

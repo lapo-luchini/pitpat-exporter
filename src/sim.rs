@@ -564,7 +564,7 @@ mod tests {
     }
 
     /// §3.7: the SupeRun simulator only takes framed packets, answers
-    /// with framed `68 2f` frames in mph × 1600, and a framed SetSpeed
+    /// with framed `68 2f` frames (speeds km/h × 1000), and a framed SetSpeed
     /// after the start ramp applies.
     #[tokio::test(start_paused = true)]
     async fn superun_framed_start_and_speed() {
